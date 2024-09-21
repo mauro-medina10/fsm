@@ -1,4 +1,4 @@
-::: mermaid
+```mermaid
 stateDiagram-v2
     [*] --> STATE_ROOT
     state STATE_ROOT {
@@ -40,4 +40,4 @@ stateDiagram-v2
     STATE_ROOT --> STATE_LOW_BATTERY : EVENT_LOW_BATTERY
     STATE_ON --> STATE_LOW_BATTERY : EVENT_LOW_BATTERY
     STATE_LOW_BATTERY --> STATE_ON : EVENT_CHARGE
-:::
+```

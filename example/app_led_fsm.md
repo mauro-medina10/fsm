@@ -1,4 +1,4 @@
-::: mermaid
+```mermaid
 stateDiagram-v2
     [*] --> ROOT_ST
     state ROOT_ST {
@@ -17,4 +17,4 @@ stateDiagram-v2
         UPDATE_ST : Update State
     }
     ROOT_ST : LED FSM
-:::
+```
