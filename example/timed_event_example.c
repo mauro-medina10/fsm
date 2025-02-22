@@ -25,6 +25,8 @@ enum {
 static void enter_on(fsm_t *self, void* data);
 static void enter_off(fsm_t *self, void* data);
 
+static void timeout_work(fsm_t *self, void* data);
+
 // Define FSM states
 FSM_STATES_INIT(blinker)
 //                  name  state id  parent          sub            entry       run   exit
@@ -39,7 +41,8 @@ FSM_TRANSITIONS_INIT(blinker)
 FSM_TRANSITION_CREATE(blinker,      OFF_ST,      ON_EV,          ON_ST)
 FSM_TRANSITION_CREATE(blinker,      ON_ST,       OFF_EV,         OFF_ST)
 FSM_TRANSITION_CREATE(blinker,      OFF_ST,      FSM_TIMEOUT_EV, ON_ST)
-FSM_TRANSITION_CREATE(blinker,      ON_ST,       FSM_TIMEOUT_EV, OFF_ST)
+//                          fsm name   State source        event       state target     transition work
+FSM_TRANSITION_WORK_CREATE(blinker,      ON_ST,       FSM_TIMEOUT_EV,    OFF_ST,       timeout_work)
 FSM_TRANSITIONS_END()
 
 /**

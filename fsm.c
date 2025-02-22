@@ -85,6 +85,12 @@ static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data) {
     }
 }
 
+static void transition_work(fsm_t *fsm, fsm_action_t action, void *data) {
+    if (action) {
+        action(fsm, data);
+    }
+}
+
 static fsm_state_t* find_lca(fsm_state_t *s1, fsm_state_t *s2) {
     fsm_state_t *a = s1, *b = s2;
     while (a != b) {
@@ -112,6 +118,7 @@ static void fsm_smart_events_init(fsm_t *fsm)
             if(fsm->transitions[j].event == i)
             {
                 fsm->smart_event[i].source_state[idx] = fsm->transitions[j].source_state;
+                fsm->smart_event[i].transition_action[idx] = fsm->transitions[j].transition_action;
                 fsm->smart_event[i].target_state[idx] = fsm->transitions[j].target_state;
                 if(++idx >= FSM_MAX_TRANSITIONS) break;
             }
@@ -233,6 +240,7 @@ static int fsm_process_events(fsm_t *fsm) {
                     fsm_state_t* lca = find_lca(fsm->current_state, fsm->smart_event[current_event.event].target_state[i]);
 
                     exit_state(fsm, lca, current_event.data);
+                    transition_work(fsm, fsm->smart_event[current_event.event].transition_action[i], current_event.data);
                     enter_state(fsm, lca, fsm->smart_event[current_event.event].target_state[i], current_event.data);
 
                     /* No need to continue if terminate was set in the exit action */

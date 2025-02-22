@@ -35,6 +35,11 @@ Transitions are defined using the `fsm_transition_t` structure, which includes:
 - Source state
 - Event triggering the transition
 - Target state
+- Transition action function pointer
+
+You can declare a transition using the two macros available:
+- FSM_TRANSITION_CREATE: creates a transition
+- FSM_TRANSITION_WORK_CREATE: creates a transition with an action function.
 
 ### Events
 
@@ -42,7 +47,7 @@ Events are simple integers that trigger state transitions. They can be associate
 
 ### Actors
 
-In this FSM implementation, **actors** represent logical entities or components that manage the behavior of specific states within the system. Each actor consists of a collection of states, with each state defined by:
+Actors in this FSM implementation represent logical entities or components that manage the behavior of specific states within the system. Each actor consists of a collection of states, with each state defined by:
 
 - **`state_id`**: A unique identifier for the state.
 - **`entry_action`**: A function executed when entering the state.
@@ -51,7 +56,8 @@ In this FSM implementation, **actors** represent logical entities or components 
 
 Actors allow grouping related state behaviors and actions into cohesive units, making the FSM modular and easier to extend or modify. This design is particularly useful for systems where multiple independent or semi-independent components (e.g., a player, a menu, or a power manager) operate within the same FSM framework.
 
-By using an array of actor pointers, the FSM can efficiently manage state transitions and actions for multiple entities.
+Actors enable you to perform actions when specific states are active, and these states can belong to different FSMs. By using an array of actor pointers, the FSM can efficiently manage state transitions and actions for multiple entities across different FSMs.
+
 ## Usage
 
 ### Defining States, Transitions and Actors
