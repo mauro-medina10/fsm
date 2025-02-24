@@ -37,6 +37,8 @@ static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void 
         state_target = state_target->default_substate;
     }
 
+    fsm->current_state = (fsm_state_t*)state_target;
+    
     // Build path from target to LCA (exclusive)
     for (fsm_state_t* s = (fsm_state_t*)state_target; s != lca && s != NULL; s = s->parent) {
         state_path[depth++] = s;
@@ -64,8 +66,6 @@ static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void 
             if((fsm->actors_table[i].actor[j].id == target->id) && (fsm->actors_table[i].actor[j].entry_action != NULL)) fsm->actors_table[i].actor[j].entry_action(fsm, data);
         }
     }
-
-    fsm->current_state = (fsm_state_t*)state_target;
 }
 
 static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data) {
