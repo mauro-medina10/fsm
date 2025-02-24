@@ -8,6 +8,7 @@ This script takes a .c file that implemets a finite state machine using the FSM 
     * FSM_CREATE_STATE
     * FSM_TRANSITIONS_INIT
     * FSM_TRANSITION_CREATE
+    * FSM_TRANSITION_WORK_CREATE
     
 Usage: Call script from command line 
 
@@ -93,12 +94,14 @@ class fsm_mermaid:
                 elements[idx] = [item.strip() for item in line.split(',')]
                 idx = idx + 1
             self.fsm_states = elements
-    
+       
     def fsm_transitions_get(self):
         pattern = rf"FSM_TRANSITION_CREATE\({self.fsm_name},\s*(.+?)\)"
+        pattern_w = rf"FSM_TRANSITION_WORK_CREATE\({self.fsm_name},\s*(.+?)\)"
         self.fsm_transitions = []
+        self.fsm_transitions_w = []
         
-        # Get the fsm states
+        # Get the fsm transitions
         match = re.findall(pattern, self.content)
 
         if match:
@@ -107,8 +110,19 @@ class fsm_mermaid:
             for line in match:
                 elements[idx] = [item.strip() for item in line.split(',')]
                 idx = idx + 1
-            self.fsm_transitions = elements
-    
+                self.fsm_transitions = elements
+                
+        # Get the fsm transitions with work
+        match_w = re.findall(pattern_w, self.content)
+
+        if match_w:
+            idx = 0
+            elements = match_w
+            for line in match_w:
+                elements[idx] = [item.strip() for item in line.split(',')]
+                idx = idx + 1
+                self.fsm_transitions_w = elements
+        
     def fsm_states_parse(self):
         self.fsm_st = []
         element_list = []
@@ -162,6 +176,10 @@ class fsm_mermaid:
             if self.fsm_transitions != []:
                 for trans in self.fsm_transitions:
                     file.write(f"\t {trans[0]} --> {trans[2]} : {trans[1]}\n")
+            #Transitions with work
+            if self.fsm_transitions != []:
+                for trans in self.fsm_transitions_w:
+                    file.write(f"\t {trans[0]} --> {trans[2]} : {trans[1]} / {trans[3]}()\n")
                    
             #tail
             file.write(self.mermaid_tail)
