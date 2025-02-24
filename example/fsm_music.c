@@ -163,7 +163,7 @@ static void led_enter_on(fsm_t *self, void* data){print("Speaker's led is on")}
 static void led_run_playing(fsm_t *self, void* data){print("Speaker's led is dancing")}
 
 int main() {
-    fsm_t music_player;
+    fsm_t music_player = {0};
     int ret = 0;
 
     // Simulate music player actions

@@ -122,6 +122,17 @@ extern "C" {
 #define FSM_TRANSITIONS_END()   };
 
 /**
+ * @brief Internal helper macro to create a transition (used by other macros)
+ */
+#define FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _work) \
+{                                                                                   \
+    .source_state = (fsm_state_t*)&_name##_states[_source_id],                      \
+    .event = _event,                                                                \
+    .target_state = (fsm_state_t*)&_name##_states[_target_id],                      \
+    .transition_action = (_work),                                                   \
+},
+
+/**
  * @brief Create a transitions array for the FSM
  * 
  * @param _name Should be the same as used in FSM_STATES_INIT(name)
@@ -130,12 +141,21 @@ extern "C" {
  * @param _target_id Target state ID
  * 
  */
-#define FSM_TRANSITION_CREATE(_name, _source_id, _event, _target_id)    \
-{                                                                       \
-    .source_state = (fsm_state_t*)&_name##_states[_source_id],          \
-    .event = _event,                                                    \
-    .target_state = (fsm_state_t*)&_name##_states[_target_id],          \
-},                          
+#define FSM_TRANSITION_CREATE(_name, _source_id, _event, _target_id) \
+    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, NULL)
+
+/**
+ * @brief Create a transitions array for the FSM with work to be done
+ * 
+ * @param _name Should be the same as used in FSM_STATES_INIT(name)
+ * @param _source_id Source state ID
+ * @param event Event of the transition
+ * @param _target_id Target state ID
+ * @param _work Pointer to the work function of the transition 
+ * 
+ */
+#define FSM_TRANSITION_WORK_CREATE(_name, _source_id, _event, _target_id, _work) \
+    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _work)
 
 // Gets the number of ticks from time value in ms
 #define FSM_MS_2_TICKS(fsm, ms) (fsm.fsm_ms_ticks*ms)
@@ -202,10 +222,12 @@ typedef struct {
     fsm_state_t* source_state;
     uint32_t event;
     fsm_state_t* target_state;
+    fsm_action_t transition_action;
 } fsm_transition_t;
 
 typedef struct {
     fsm_state_t* source_state[FSM_MAX_TRANSITIONS+1];
+    fsm_action_t transition_action[FSM_MAX_TRANSITIONS+1];
     fsm_state_t* target_state[FSM_MAX_TRANSITIONS+1];
 } fsm_smt_events_t;
 
