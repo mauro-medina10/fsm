@@ -44,7 +44,7 @@ Events are simple integers that trigger state transitions. They can be associate
 
 In this FSM implementation, **actors** represent logical entities or components that manage the behavior of specific states within the system. Each actor consists of a collection of states, with each state defined by:
 
-- **`state_id`**: A unique identifier for the state.
+- **`id`**: A unique identifier for the state.
 - **`entry_action`**: A function executed when entering the state.
 - **`run_action`**: A function invoked while the state is active.
 - **`exit_action`**: A function called when exiting the state.

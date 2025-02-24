@@ -109,7 +109,7 @@ extern "C" {
  */
 #define FSM_CREATE_STATE(_name, _id, _parent, _sub, _entry, _run, _exit)    \
 [_id] = {                                                                   \
-    .state_id = _id,                                                        \
+    .id = _id,                                                        \
     .parent = (_parent == 0) ? (fsm_state_t*)_parent : (fsm_state_t*)&_name##_states[_parent],       \
     .default_substate = (_sub == 0) ? (fsm_state_t*)_sub : (fsm_state_t*)&_name##_states[_sub],      \
     .entry_action = _entry,                                                 \
@@ -155,7 +155,7 @@ extern "C" {
  */
 #define FSM_ACTOR_CREATE(_source_id, _entry, _run, _exit)    \
 {                                                            \
-    .state_id       = _source_id,                            \
+    .id       = _source_id,                            \
     .entry_action   = _entry,                                \
     .exit_action    = _exit,                                 \
     .run_action     = _run,                                  \
@@ -185,7 +185,7 @@ typedef void (*fsm_action_t)(fsm_t* self, void* data);
 
 struct fsm_state_t {
     
-    int state_id;
+    int id;
     
     uint32_t t_period;
     uint32_t t_count;
@@ -217,7 +217,7 @@ struct fsm_events_t
 
 struct fsm_actor_t {
     // State relevant to actor
-    int state_id;
+    int id;
     // Work to be done
     fsm_action_t entry_action;
     fsm_action_t exit_action;

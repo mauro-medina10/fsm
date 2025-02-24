@@ -61,7 +61,7 @@ static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void 
     {
         for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
         {
-            if((fsm->actors_table[i].actor[j].state_id == target->state_id) && (fsm->actors_table[i].actor[j].entry_action != NULL)) fsm->actors_table[i].actor[j].entry_action(fsm, data);
+            if((fsm->actors_table[i].actor[j].id == target->id) && (fsm->actors_table[i].actor[j].entry_action != NULL)) fsm->actors_table[i].actor[j].entry_action(fsm, data);
         }
     }
 
@@ -80,7 +80,7 @@ static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data) {
     {
         for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
         {
-            if((fsm->actors_table[i].actor[j].state_id == state->state_id) && (fsm->actors_table[i].actor[j].exit_action != NULL)) fsm->actors_table[i].actor[j].exit_action(fsm, data);
+            if((fsm->actors_table[i].actor[j].id == state->id) && (fsm->actors_table[i].actor[j].exit_action != NULL)) fsm->actors_table[i].actor[j].exit_action(fsm, data);
         }
     }
 }
@@ -284,7 +284,7 @@ int fsm_run(fsm_t *fsm)
     {
         for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
         {
-            if((fsm->actors_table[i].actor[j].state_id == fsm->current_state->state_id) && (fsm->actors_table[i].actor[j].run_action != NULL)) fsm->actors_table[i].actor[j].run_action(fsm, fsm->current_data);
+            if((fsm->actors_table[i].actor[j].id == fsm->current_state->id) && (fsm->actors_table[i].actor[j].run_action != NULL)) fsm->actors_table[i].actor[j].run_action(fsm, fsm->current_data);
         }
     }
     return 0;
@@ -294,7 +294,7 @@ int fsm_state_get(fsm_t *fsm)
 {
     if(fsm == NULL) return FSM_ST_NONE;
 
-    return fsm->current_state->state_id;
+    return fsm->current_state->id;
 }
 
 void fsm_terminate(fsm_t *fsm, int val)
