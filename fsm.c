@@ -134,6 +134,8 @@ int fsm_init(fsm_t *fsm, const fsm_transition_t *transitions, size_t num_transit
     if(fsm == NULL || transitions == NULL || initial_state == NULL) return -1;
     if(num_transitions == 0) return -2;
 
+    memset(fsm, 0, sizeof(fsm_t));
+    
     fsm->transitions         = transitions;
     fsm->num_transitions     = num_transitions;
     fsm->num_events          = num_events;
@@ -143,8 +145,6 @@ int fsm_init(fsm_t *fsm, const fsm_transition_t *transitions, size_t num_transit
     fsm->current_data        = initial_data;
     fsm->fsm_ms_ticks        = time_period_ticks;
     
-    memset(fsm->actors_table, 0, sizeof(fsm->actors_table));
-
     fsm_smart_events_init(fsm);
 
 #ifdef FREERTOS_API
