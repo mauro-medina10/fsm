@@ -68,12 +68,12 @@ FSM_TRANSITIONS_END()
 
 static void enter_off(fsm_t *self, void* data) 
 { 
-    print("Led OFF\n");
+    printf("Led OFF\n");
 }
 
 static void enter_on(fsm_t *self, void *data) 
 { 
-    print("Led ON\n"); 
+    printf("Led ON\n"); 
 }
 
 /**
@@ -94,7 +94,7 @@ int main() {
     int ret = 0;
 
     // Simulate music player actions
-    print("--- Starting LED fsm ---\n");
+    printf("--- Starting LED fsm ---\n");
 
     // FSM init
     fsm_init(&led,                              // fsm:               fsm pointer
@@ -106,8 +106,8 @@ int main() {
                 &dev                            // initial_data:      User custom data struct pointer
             );
     
-    fsm_timed_event_set(&FSM_STATE_GET(LED, ST_BLINK_ON), BLINK_PERIOD);
-    fsm_timed_event_set(&FSM_STATE_GET(LED, ST_BLINK_OFF), BLINK_PERIOD);
+    fsm_timed_event_set(&FSM_STATE_GET(led, ST_BLINK_ON), BLINK_PERIOD);
+    fsm_timed_event_set(&FSM_STATE_GET(led, ST_BLINK_OFF), BLINK_PERIOD);
 
     // Powers on the led
     fsm_dispatch(&led, EV_ON, NULL);
@@ -121,7 +121,7 @@ int main() {
     // Running the FSM
     ret |= fsm_run(&led);
 
-    print("End %d\n", ret);
+    printf("End %d\n", ret);
 
     while (1); // Led should blink as long as periodic_timer_1ms is called
 
