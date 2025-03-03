@@ -28,7 +28,17 @@ class fsm_mermaid:
     mermaid_tail = "\n```"
     
     fsm_init_pat = r"FSM_STATES_INIT\((.+?)\)"
-    fsm_st_note = "FSM_ST_NONE"
+    
+    fsm_st_none = "FSM_ST_NONE"
+    fsm_st_end = "FSM_ST_END"
+    fsm_st_first = "FSM_ST_FIRST"
+    
+    fsm_event_none = "FSM_EV_NONE"
+    fsm_event_end = "FSM_END_EV"
+    fsm_event_timeout = "FSM_TIMEOUT_EV"
+    fsm_event_first = "FSM_EV_FIRST"
+    
+    fsm_end_dict = {"FSM_END_EV" : "[*]", "FSM_ST_END" : "[*]"}
     
     def __init__(self, fname="example"):
         
@@ -130,7 +140,7 @@ class fsm_mermaid:
         
         for element in self.fsm_states:
             # Parent state
-            if element[2] != self.fsm_st_note:    
+            if element[2] != self.fsm_st_none:    
                 element_list.append(element[0])
                 element_list.append(element[2])
                 for new_el in self.fsm_states:  
@@ -169,17 +179,22 @@ class fsm_mermaid:
                 file.write(str(state[1])+"\n")
 
                 for sub in state[2:]:
-                    file.write("\t\t"+str(sub)+"\n")
+                    # write transitions of sub-states
+                    for trans in self.fsm_transitions[:]:
+                        if(trans[0] == sub):
+                            file.write(f"\t\t {str(sub)} --> {self.fsm_end_dict.get(trans[2], trans[2])} : {self.fsm_end_dict.get(trans[1], trans[1])}\n")
+                            # delete transition from self.fsm_transitions
+                            self.fsm_transitions.remove(trans)
                     
                 file.write("\t}\n\n")
             #Transitions
             if self.fsm_transitions != []:
                 for trans in self.fsm_transitions:
-                    file.write(f"\t {trans[0]} --> {trans[2]} : {trans[1]}\n")
+                    file.write(f"\t {trans[0]} --> {self.fsm_end_dict.get(trans[2], trans[2])} : {self.fsm_end_dict.get(trans[1], trans[1])}\n")
             #Transitions with work
             if self.fsm_transitions != []:
                 for trans in self.fsm_transitions_w:
-                    file.write(f"\t {trans[0]} --> {trans[2]} : {trans[1]} / {trans[3]}()\n")
+                    file.write(f"\t {trans[0]} --> {self.fsm_end_dict.get(trans[2], trans[2])} : {self.fsm_end_dict.get(trans[1], trans[1])} / {trans[3]}()\n")
                    
             #tail
             file.write(self.mermaid_tail)

@@ -54,38 +54,39 @@ extern "C" {
 // Max number of transitions for an event
 #define FSM_MAX_TRANSITIONS 8
 #endif
+
 //----------------------------------------------------------------------
 //	DEFINITIONS
 //----------------------------------------------------------------------
-/**
- * @brief FSM NULL STATE
- * 
- */
-#define FSM_ST_NONE 0
 
 /**
- * @brief FSM FIRST STATE
+ * @brief FSM STATES
  * 
  */
-#define FSM_ST_FIRST 1
+enum fsm_states_e
+{
+    FSM_ST_NONE = 0,
+    FSM_ST_END,
+    FSM_ST_FIRST,
+};
 
 /**
- * @brief FSM FIRST EVENT
+ * @brief FSM EVENTS
  * 
  */
-#define FSM_EV_FIRST 2
+enum fsm_events_e
+{
+    FSM_EV_NONE = 0,
+    FSM_END_EV,
+    FSM_TIMEOUT_EV,
+    FSM_EV_FIRST,
+};
 
 /**
  * @brief FSM FIRST ACTOR
  * 
  */
 #define FSM_ACTOR_FIRST 1
-
-/**
- * @brief FSM TIMED EVENT
- * 
- */
-#define FSM_TIMEOUT_EV 1
 
 /**
  * @brief FSM NO TIMED EVENTS
@@ -98,7 +99,7 @@ extern "C" {
 //----------------------------------------------------------------------
 
 // States table definition
-#define FSM_STATES_INIT(name)    static fsm_state_t name##_states[] = { [0] = {0},
+#define FSM_STATES_INIT(name)    static fsm_state_t name##_states[] = {[FSM_EV_NONE] = {0},[FSM_ST_END] = {.id = FSM_ST_END},
 #define FSM_STATES_END()        };
 
 /**
@@ -113,14 +114,14 @@ extern "C" {
  * @param _exit Exit action function pointer
  * 
  */
-#define FSM_CREATE_STATE(_name, _id, _parent, _sub, _entry, _run, _exit)    \
-[_id] = {                                                                   \
-    .id = _id,                                                        \
-    .parent = (_parent == 0) ? (fsm_state_t*)_parent : (fsm_state_t*)&_name##_states[_parent],       \
-    .default_substate = (_sub == 0) ? (fsm_state_t*)_sub : (fsm_state_t*)&_name##_states[_sub],      \
-    .entry_action = _entry,                                                 \
-    .exit_action = _exit,                                                   \
-    .run_action = _run                                                      \
+#define FSM_CREATE_STATE(_name, _id, _parent, _sub, _entry, _run, _exit)                            \
+[_id] = {                                                                                           \
+    .id = _id,                                                                                      \
+    .parent = (_parent == 0) ? (fsm_state_t*)_parent : (fsm_state_t*)&_name##_states[_parent],      \
+    .default_substate = (_sub == 0) ? (fsm_state_t*)_sub : (fsm_state_t*)&_name##_states[_sub],     \
+    .entry_action = _entry,                                                                         \
+    .exit_action = _exit,                                                                           \
+    .run_action = _run                                                                              \
 },
 
 // Transition table definition

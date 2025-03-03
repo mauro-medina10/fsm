@@ -21,11 +21,19 @@
 #include "ring_buff.h"
 #endif 
 
+/**
+ * @brief FSM FIRST ACTOR
+ * 
+ */
+#define FSM_ACTOR_FIRST 1
+
 struct internal_ctx {
 	int terminate:  1;
 	int is_exit:    1;
     int handled:    1;
 };
+
+static fsm_state_t* find_lca(fsm_state_t *s1, fsm_state_t *s2);
 
 static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void *data) {
     fsm_state_t* state_path[MAX_HIERARCHY_DEPTH];
@@ -91,6 +99,66 @@ static void transition_work(fsm_t *fsm, fsm_action_t action, void *data) {
     }
 }
 
+static uint8_t find_ancestor_depth(fsm_state_t *state, fsm_state_t *ancestor) {
+    uint8_t depth = 0;
+    fsm_state_t *s = state;
+
+    if (s == ancestor) {
+        return depth;
+    }
+
+    while (s->parent != NULL) 
+    {
+        if (s == ancestor) {
+            return depth;
+        }
+        s = s->parent;
+        depth++;
+    }
+    return UINT8_MAX; // Not an ancestor;
+}
+
+static void end_state(fsm_t *fsm, fsm_state_t *state, void *data) {
+    
+    int ancestor_idx = -1;
+    
+    // Find an end event transition of an ancestor state
+    for (int i = 0; (i < FSM_MAX_TRANSITIONS+1) && (fsm->smart_event[FSM_END_EV].source_state[i] != NULL); i++)
+    {
+        uint8_t ancestor_depth = MAX_HIERARCHY_DEPTH+1;
+        uint8_t depth = 0;
+        fsm_state_t *s = fsm->smart_event[FSM_END_EV].source_state[i]; // has to be an ancestor state
+        
+        // Check if the s state is an ancestor of the current state
+        if((find_lca(state, s) != s)) continue;
+        
+        depth = find_ancestor_depth(state, s);
+        if(depth < ancestor_depth)
+        {
+            ancestor_depth = depth; 
+            ancestor_idx = i;
+        } 
+    }
+    // If no valid ancestor was found, terminate
+    if(ancestor_idx == -1) 
+    {
+        fsm_terminate(fsm, FSM_END_EV);
+        return;
+    }
+
+    // exit to the ancestor state and then enter the target state
+    exit_state(fsm, fsm->smart_event[FSM_END_EV].source_state[ancestor_idx], data);
+    transition_work(fsm, fsm->smart_event[FSM_END_EV].transition_action[ancestor_idx], data);
+    enter_state(fsm, fsm->smart_event[FSM_END_EV].source_state[ancestor_idx], fsm->smart_event[FSM_END_EV].target_state[ancestor_idx], data);
+}
+
+/**
+ * @brief Finds the least common ancestor state between two states
+ * 
+ * @param s1 Current state
+ * @param s2 Target state
+ * @return fsm_state_t* least common ancestor state
+ */
 static fsm_state_t* find_lca(fsm_state_t *s1, fsm_state_t *s2) {
     fsm_state_t *a = s1, *b = s2;
     while (a != b) {
@@ -111,7 +179,7 @@ static void fsm_smart_events_init(fsm_t *fsm)
     memset(fsm->smart_event, 0, sizeof(fsm_smt_events_t));
 
     // Sorts transitions by event id
-    for (int i = FSM_TIMEOUT_EV; i <= (fsm->num_events+FSM_EV_FIRST); i++)
+    for (int i = FSM_EV_NONE+1; i <= (fsm->num_events+FSM_EV_FIRST); i++)
     {
         for (int j = 1; j <= fsm->num_transitions; j++)
         {
@@ -235,7 +303,11 @@ static int fsm_process_events(fsm_t *fsm) {
         {
             for (int i = 0; (i < FSM_MAX_TRANSITIONS+1) && (fsm->smart_event[current_event.event].source_state[i] != NULL); i++)
             {
-                if(fsm->smart_event[current_event.event].source_state[i] == current)
+                if(fsm->smart_event[current_event.event].source_state[i] == current && fsm->smart_event[current_event.event].target_state[i]->id == FSM_ST_END)
+                {
+                    end_state(fsm, fsm->smart_event[current_event.event].source_state[i], current_event.data);
+                }
+                else if(fsm->smart_event[current_event.event].source_state[i] == current)
                 {
                     fsm_state_t* lca = find_lca(fsm->current_state, fsm->smart_event[current_event.event].target_state[i]);
 
