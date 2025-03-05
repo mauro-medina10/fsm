@@ -27,8 +27,6 @@
  */
 #define FSM_ACTOR_FIRST 1
 
-static volatile int evt = 0;
-
 struct internal_ctx {
 	int terminate:  1;
 	int is_exit:    1;
@@ -85,12 +83,12 @@ static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data) {
         }
         s->t_count = s->t_period;
     }
-    // Actors
+    // Actors: Excecute exit action of current state only
     for (size_t i = 0; ((i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL)); i++)
     {
         for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
         {
-            if((fsm->actors_table[i].actor[j].id == state->id) && (fsm->actors_table[i].actor[j].exit_action != NULL)) fsm->actors_table[i].actor[j].exit_action(fsm, data);
+            if((fsm->actors_table[i].actor[j].id == fsm->current_state->id) && (fsm->actors_table[i].actor[j].exit_action != NULL)) fsm->actors_table[i].actor[j].exit_action(fsm, data);
         }
     }
 }

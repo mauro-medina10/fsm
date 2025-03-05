@@ -18,8 +18,8 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef CONFIG_FREERTOS_PORT
-// #define FREERTOS_API
+#ifndef FREERTOS_API
+//#define FREERTOS_API
 #endif
 
 #ifdef FREERTOS_API
@@ -86,7 +86,7 @@ enum fsm_events_e
  * @brief FSM FIRST ACTOR
  * 
  */
-#define FSM_ACTOR_FIRST 1
+#define FSM_ACTOR_FIRST 0
 
 /**
  * @brief FSM NO TIMED EVENTS
