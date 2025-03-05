@@ -27,6 +27,8 @@
  */
 #define FSM_ACTOR_FIRST 1
 
+static volatile int evt = 0;
+
 struct internal_ctx {
 	int terminate:  1;
 	int is_exit:    1;
@@ -423,7 +425,17 @@ void fsm_ticks_hook(fsm_t *fsm)
         fsm->current_state->t_count--;
         if(fsm->current_state->t_count == 0) 
         {
+#ifdef FREERTOS_API
+            if(xPortInIsrContext())
+            {
+                xQueueGenericSendFromISR(fsm->event_queue, &new_event, NULL, queueSEND_TO_FRONT);
+            }else
+            {
+                xQueueGenericSend(fsm->event_queue, &new_event, 0, queueSEND_TO_FRONT );
+            }
+#else
             ringbuff_put_first(&fsm->event_queue, &new_event);
+#endif            
 #ifdef CONFIG_RUN_ON_TIMER_HOOK            
             fsm_run(fsm);
 #endif            
