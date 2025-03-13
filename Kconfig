@@ -1,0 +1,10 @@
+menu "FSM Configuration"
+
+    config FREERTOS_API
+        bool "FreeRTOS API"
+        default n
+        help
+            Select the FreeRTOS API version to use. This will use the freertos queue API to handle 
+            events.
+
+endmenu

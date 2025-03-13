@@ -18,11 +18,11 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef FREERTOS_API
-//#define FREERTOS_API
+#ifndef CONFIG_FREERTOS_API
+// #define CONFIG_FREERTOS_API
 #endif
 
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #else
@@ -269,7 +269,7 @@ struct fsm_t {
     // Total number of events
     size_t num_events;
     // Events ring buffer
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
     QueueHandle_t event_queue;
 #else
     struct ringbuff event_queue;

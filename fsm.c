@@ -14,18 +14,12 @@
 
 #include "fsm.h"
 
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #else
 #include "ring_buff.h"
 #endif 
-
-/**
- * @brief FSM FIRST ACTOR
- * 
- */
-#define FSM_ACTOR_FIRST 1
 
 struct internal_ctx {
 	int terminate:  1;
@@ -215,7 +209,7 @@ int fsm_init(fsm_t *fsm, const fsm_transition_t *transitions, size_t num_transit
     
     fsm_smart_events_init(fsm);
 
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
     fsm->event_queue = xQueueCreate(FSM_MAX_EVENTS, sizeof(struct fsm_events_t));
     if(fsm->event_queue == NULL) return -3;
 #else
@@ -261,7 +255,7 @@ void fsm_dispatch(fsm_t *fsm, uint32_t event, void *data) {
 
     struct fsm_events_t new_event = {event, data};
 
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
     if(xPortInIsrContext())
     {
         xQueueSendFromISR(fsm->event_queue, &new_event, NULL);
@@ -283,7 +277,7 @@ static int fsm_process_events(fsm_t *fsm) {
 
     struct fsm_events_t current_event;
 
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
     int event_ready = 0;
     if(xPortInIsrContext())
     {
@@ -328,7 +322,7 @@ static int fsm_process_events(fsm_t *fsm) {
         if (internal->terminate) {
             return fsm->terminate_val;
         }
-#ifdef FREERTOS_API        
+#ifdef CONFIG_FREERTOS_API        
         if(xPortInIsrContext())
         {
             event_ready = xQueueReceiveFromISR(fsm->event_queue, &current_event, NULL);
@@ -390,7 +384,7 @@ void fsm_terminate(fsm_t *fsm, int val)
 int fsm_has_pending_events(fsm_t *fsm) {
     if(fsm == NULL) return -1;
 
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
         if(xPortInIsrContext())
         {
             return uxQueueMessagesWaitingFromISR(fsm->event_queue) > 0;
@@ -407,7 +401,7 @@ void fsm_flush_events(fsm_t *fsm) {
     
     if(fsm == NULL) return;
 
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
     xQueueReset(fsm->event_queue);
 #else
     ringbuff_flush(&fsm->event_queue);
@@ -423,7 +417,7 @@ void fsm_ticks_hook(fsm_t *fsm)
         fsm->current_state->t_count--;
         if(fsm->current_state->t_count == 0) 
         {
-#ifdef FREERTOS_API
+#ifdef CONFIG_FREERTOS_API
             if(xPortInIsrContext())
             {
                 xQueueGenericSendFromISR(fsm->event_queue, &new_event, NULL, queueSEND_TO_FRONT);
