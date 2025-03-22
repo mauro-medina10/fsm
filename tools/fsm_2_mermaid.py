@@ -192,7 +192,7 @@ class fsm_mermaid:
                 for trans in self.fsm_transitions:
                     file.write(f"\t {trans[0]} --> {self.fsm_end_dict.get(trans[2], trans[2])} : {self.fsm_end_dict.get(trans[1], trans[1])}\n")
             #Transitions with work
-            if self.fsm_transitions != []:
+            if self.fsm_transitions_w != []:
                 for trans in self.fsm_transitions_w:
                     file.write(f"\t {trans[0]} --> {self.fsm_end_dict.get(trans[2], trans[2])} : {self.fsm_end_dict.get(trans[1], trans[1])} / {trans[3]}()\n")
                    
