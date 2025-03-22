@@ -63,6 +63,7 @@ extern "C" {
  * @brief FSM STATES
  * 
  */
+// TODO: Add the start state, so user can create tokens and put them in states needed
 enum fsm_states_e
 {
     FSM_ST_NONE = 0,
@@ -74,6 +75,7 @@ enum fsm_states_e
  * @brief FSM EVENTS
  * 
  */
+// TODO: Add a token_available event, so state automatically transits to the next state when a token is available
 enum fsm_events_e
 {
     FSM_EV_NONE = 0,
@@ -210,6 +212,8 @@ typedef struct fsm_state_t fsm_state_t;
 typedef struct fsm_t fsm_t;
 typedef void (*fsm_action_t)(fsm_t* self, void* data);
 
+// TODO: States now will have a tokens parameter, could be uint8_t or uint16_t
+// but maybe token should be a pointer to a struct with more info
 struct fsm_state_t {
     
     int id;
@@ -226,12 +230,13 @@ struct fsm_state_t {
 };
 
 typedef struct {
-    fsm_state_t* source_state;
-    uint32_t event;
-    fsm_state_t* target_state;
-    fsm_action_t transition_action;
+    fsm_state_t*    source_state;
+    uint32_t        event;
+    fsm_state_t*    target_state;
+    fsm_action_t    transition_action;
 } fsm_transition_t;
 
+// TODO: For smart events, probably need to make source and target states a matrix
 typedef struct {
     fsm_state_t* source_state[FSM_MAX_TRANSITIONS+1];
     fsm_action_t transition_action[FSM_MAX_TRANSITIONS+1];

@@ -38,7 +38,7 @@ static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void 
     while (state_target->default_substate) {
         state_target = state_target->default_substate;
     }
-
+    // TODO: Here simply increase the state's token count by one
     fsm->current_state = (fsm_state_t*)state_target;
     
     // Build path from target to LCA (exclusive)
@@ -189,8 +189,16 @@ static void fsm_smart_events_init(fsm_t *fsm)
     }
     
 }
-
-int fsm_init(fsm_t *fsm, const fsm_transition_t *transitions, size_t num_transitions, size_t num_events, uint32_t time_period_ticks, fsm_state_t* initial_state, void *initial_data) {
+// TODO: Simulteneity: implement it under a CONFIG flag???
+int fsm_init(fsm_t                      *fsm,
+                const fsm_transition_t  *transitions, 
+                size_t                  num_transitions, 
+                size_t                  num_events, 
+                uint32_t                time_period_ticks, 
+                fsm_state_t*            initial_state, 
+                void                    *initial_data
+            ) 
+{
     struct internal_ctx *const internal = (void *)&fsm->internal;
 
     if(fsm == NULL || transitions == NULL || initial_state == NULL) return -1;
@@ -215,6 +223,7 @@ int fsm_init(fsm_t *fsm, const fsm_transition_t *transitions, size_t num_transit
 #else
     ringbuff_init(&fsm->event_queue, fsm->events_buff, FSM_MAX_EVENTS, sizeof(struct fsm_events_t));
 #endif
+    // TODO: Maybe make it possible to give more than one initial state
     enter_state(fsm, initial_state, initial_state, initial_data);
 
     return 0;
@@ -291,16 +300,21 @@ static int fsm_process_events(fsm_t *fsm) {
     while (ringbuff_get(&fsm->event_queue, &current_event) == 0) {
 #endif    
         internal->handled = 0;
-
+        
+        // TODO: To implement states simultaneity, we don't need to have a current state
         fsm_state_t* current = fsm->current_state;
         while (internal->handled == 0 && current != NULL) 
         {
             for (int i = 0; (i < FSM_MAX_TRANSITIONS+1) && (fsm->smart_event[current_event.event].source_state[i] != NULL); i++)
             {
+                // TODO: The end state shouldn't terminate the fsm, it should just consume a token
                 if(fsm->smart_event[current_event.event].source_state[i] == current && fsm->smart_event[current_event.event].target_state[i]->id == FSM_ST_END)
                 {
                     end_state(fsm, fsm->smart_event[current_event.event].source_state[i], current_event.data);
                 }
+                // TODO: Here we need to check if the source state has the necessary tokens to transit to the target state
+                // this for every transition of the event
+                // Also, we need to check if there are any other states that has the same transition, if so, we need to check if the source state has the necessary tokens
                 else if(fsm->smart_event[current_event.event].source_state[i] == current)
                 {
                     fsm_state_t* lca = find_lca(fsm->current_state, fsm->smart_event[current_event.event].target_state[i]);
