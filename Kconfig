@@ -6,5 +6,11 @@ menu "FSM Configuration"
         help
             Select the FreeRTOS API version to use. This will use the freertos queue API to handle 
             events.
-
+            
+    config STATES_TOKENS
+        bool "Simulteanity of states support"
+        default n
+        help
+            Select this option to enable the simulteanity of states. This will allow the FSM to be in 
+            multiple states at the same time.
 endmenu

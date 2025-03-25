@@ -22,9 +22,10 @@
 #endif 
 
 struct internal_ctx {
-	int terminate:  1;
-	int is_exit:    1;
-    int handled:    1;
+	int terminate:      1;
+	int is_exit:        1;
+    int handled:        1;
+    int join_tokens:    1;
 };
 
 static fsm_state_t* find_lca(fsm_state_t *s1, fsm_state_t *s2);
@@ -165,7 +166,7 @@ static fsm_state_t* find_lca(fsm_state_t *s1, fsm_state_t *s2) {
     }
     return a;
 }
-
+// TODO: here for simul transitions, we should sort transitions by event and by same target state
 static void fsm_smart_events_init(fsm_t *fsm)
 {
     uint32_t idx = 0;
@@ -277,6 +278,33 @@ void fsm_dispatch(fsm_t *fsm, uint32_t event, void *data) {
 #endif    
 }
 
+static int fsm_token_check(fsm_t *fsm, struct fsm_events_t current_event, int i)
+{
+    struct internal_ctx *const internal = (void *)&fsm->internal;
+
+    if(fsm->smart_event[current_event.event].source_state[i]->tokens.count > 0)
+    {
+        internal->join_tokens = 1;
+        // If a join transition, search for other source state and look for tokens
+        if(fsm->smart_event[current_event.event].join_id[i] >= 0)
+        {
+            for (int j = i+1; 
+                (j < FSM_MAX_TRANSITIONS+1) 
+                    && (fsm->smart_event[current_event.event].join_id[j] == fsm->smart_event[current_event.event].join_id[i]); 
+                j++)
+            {
+                if(fsm->smart_event[current_event.event].source_state[j]->tokens.count == 0) 
+                {
+                    internal->join_tokens = 0;
+                    return internal->join_tokens;
+                }
+            }
+        }
+    }
+
+    return internal->join_tokens;
+}
+
 static int fsm_process_events(fsm_t *fsm) {
     
     if(fsm == NULL) return -1;
@@ -300,23 +328,39 @@ static int fsm_process_events(fsm_t *fsm) {
     while (ringbuff_get(&fsm->event_queue, &current_event) == 0) {
 #endif    
         internal->handled = 0;
-        
-        // TODO: To implement states simultaneity, we don't need to have a current state
+#ifdef CONFIG_STATES_TOKENS        
+        internal->join_tokens = 0;
+#else
         fsm_state_t* current = fsm->current_state;
-        while (internal->handled == 0 && current != NULL) 
-        {
-            for (int i = 0; (i < FSM_MAX_TRANSITIONS+1) && (fsm->smart_event[current_event.event].source_state[i] != NULL); i++)
+#endif     
+        while (internal->handled == 0 
+#ifndef CONFIG_STATES_TOKENS               
+                && current != NULL
+#endif
+            ){
+            
+                for (int i = 0; (i < FSM_MAX_TRANSITIONS+1) && (fsm->smart_event[current_event.event].source_state[i] != NULL); i++)
             {
                 // TODO: The end state shouldn't terminate the fsm, it should just consume a token
-                if(fsm->smart_event[current_event.event].source_state[i] == current && fsm->smart_event[current_event.event].target_state[i]->id == FSM_ST_END)
+                if(
+#ifndef CONFIG_STATES_TOKENS                       
+                    fsm->smart_event[current_event.event].source_state[i] == current && 
+#endif
+                    fsm->smart_event[current_event.event].target_state[i]->id == FSM_ST_END)
                 {
                     end_state(fsm, fsm->smart_event[current_event.event].source_state[i], current_event.data);
                 }
                 // TODO: Here we need to check if the source state has the necessary tokens to transit to the target state
-                // this for every transition of the event
+                // this for every transition of the event that has the same target state
                 // Also, we need to check if there are any other states that has the same transition, if so, we need to check if the source state has the necessary tokens
-                else if(fsm->smart_event[current_event.event].source_state[i] == current)
-                {
+                else if(
+#ifdef CONFIG_STATES_TOKENS
+                    fsm_token_check(fsm, current_event, i)
+#else
+                    fsm->smart_event[current_event.event].source_state[i] == current                    
+#endif
+                ){
+
                     fsm_state_t* lca = find_lca(fsm->current_state, fsm->smart_event[current_event.event].target_state[i]);
 
                     exit_state(fsm, lca, current_event.data);
@@ -330,7 +374,9 @@ static int fsm_process_events(fsm_t *fsm) {
                     internal->handled = 1;
                 }
             }
+#ifndef CONFIG_STATES_TOKENS 
             current = current->parent;
+#endif
         }
         
         if (internal->terminate) {

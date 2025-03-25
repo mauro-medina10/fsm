@@ -29,6 +29,8 @@ extern "C" {
 #include "ring_buff.h"
 #endif 
 
+#include "fsm_utils.h"
+
 //----------------------------------------------------------------------
 //	CONFIGS
 //----------------------------------------------------------------------
@@ -63,11 +65,12 @@ extern "C" {
  * @brief FSM STATES
  * 
  */
-// TODO: Add the start state, so user can create tokens and put them in states needed
+// TODO: Add the user state, so user can create tokens and put them in states needed
 enum fsm_states_e
 {
     FSM_ST_NONE = 0,
     FSM_ST_END,
+    FSM_ST_USER,
     FSM_ST_FIRST,
 };
 
@@ -81,6 +84,7 @@ enum fsm_events_e
     FSM_EV_NONE = 0,
     FSM_END_EV,
     FSM_TIMEOUT_EV,
+    FSM_TOKEN_EV,
     FSM_EV_FIRST,
 };
 
@@ -133,12 +137,13 @@ enum fsm_events_e
 /**
  * @brief Internal helper macro to create a transition (used by other macros)
  */
-#define FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _work) \
-{                                                                                   \
-    .source_state = (fsm_state_t*)&_name##_states[_source_id],                      \
-    .event = _event,                                                                \
-    .target_state = (fsm_state_t*)&_name##_states[_target_id],                      \
-    .transition_action = (_work),                                                   \
+#define FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _work, _join)  \
+{                                                                                           \
+    .source_state = (fsm_state_t*)&_name##_states[_source_id],                              \
+    .event = _event,                                                                        \
+    .target_state = (fsm_state_t*)&_name##_states[_target_id],                              \
+    .transition_action = (_work),                                                           \
+    .join_id = _join,                                                                       \
 },
 
 /**
@@ -151,7 +156,7 @@ enum fsm_events_e
  * 
  */
 #define FSM_TRANSITION_CREATE(_name, _source_id, _event, _target_id) \
-    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, NULL)
+    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, NULL, 0)
 
 /**
  * @brief Create a transitions array for the FSM with work to be done
@@ -164,7 +169,20 @@ enum fsm_events_e
  * 
  */
 #define FSM_TRANSITION_WORK_CREATE(_name, _source_id, _event, _target_id, _work) \
-    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _work)
+    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _work, 0)
+
+    /**
+ * @brief Create a transitions array for the FSM with work to be done
+ * 
+ * @param _name Should be the same as used in FSM_STATES_INIT(name)
+ * @param _source_id Source state ID
+ * @param event Event of the transition
+ * @param _target_id Target state ID
+ * @param _work (optional) Pointer to the work function of the transition 
+ * 
+ */
+#define FSM_TRANSITION_JOIN_CREATE(_name, _source_id, _event, _target_id, _join_id, ...) \
+    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, UTIL_GET_ARG_N(2, __VA_ARGS__, NULL), _join_id)
 
 // Gets the number of ticks from time value in ms
 #define FSM_MS_2_TICKS(fsm, ms) (fsm.fsm_ms_ticks*ms)
@@ -220,12 +238,20 @@ struct fsm_timed_trans_t
     uint32_t t_count;
 };
 
+struct fsm_token_t
+{
+  uint16_t  count;
+  void      *data;
+};
+
 struct fsm_state_t {
     
     int id;
     
     struct fsm_timed_trans_t timer;
-    
+#ifdef CONFIG_STATES_TOKENS    
+    struct fsm_token_t tokens;
+#endif
     fsm_state_t* parent;
     fsm_state_t* default_substate;
     
@@ -239,17 +265,20 @@ typedef struct {
     uint32_t        event;
     fsm_state_t*    target_state;
     fsm_action_t    transition_action;
+#ifdef CONFIG_STATES_TOKENS     
+    int8_t          join_id;
+#endif
 } fsm_transition_t;
 
-<<<<<<< HEAD
-// TODO: For smart events, probably need to make source and target states a matrix
-=======
 
->>>>>>> main
+// TODO: For smart events, probably need to make source and target states a matrix
 typedef struct {
     fsm_state_t* source_state[FSM_MAX_TRANSITIONS+1];
     fsm_action_t transition_action[FSM_MAX_TRANSITIONS+1];
     fsm_state_t* target_state[FSM_MAX_TRANSITIONS+1];
+#ifdef CONFIG_STATES_TOKENS     
+    int8_t       join_id[FSM_MAX_TRANSITIONS+1];
+#endif
 } fsm_smt_events_t;
 
 struct fsm_events_t

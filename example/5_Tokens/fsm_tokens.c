@@ -28,6 +28,7 @@ enum {
     EV_DONE,                  
     EV_PRINT_START,    
     EV_FAIL,        
+    EV_PRINT_JOB,
     EV_LAST,                            
 };
 
@@ -37,7 +38,7 @@ static void run_printing(fsm_t *self, void* data);
 static void enter_print_job(fsm_t *self, void* data);
 
 // Define FSM states
-FSM_STATES_INIT(printers)
+FSM_TOKEN_STATES_INIT(printers)
 //             name   state id        parent        sub             entry           run             exit
 FSM_CREATE_STATE(printers, ST_ROOT,        FSM_ST_NONE,  ST_PRINTERS,    NULL,           NULL,           NULL)
 FSM_CREATE_STATE(printers, ST_PRINT_JOBS,  ST_ROOT,      FSM_ST_NONE,  enter_print_job,  NULL,           NULL)
@@ -47,14 +48,14 @@ FSM_STATES_END()
 
 // Define FSM transitions
 FSM_TRANSITIONS_INIT(printers)
-//                  fsm name      State source      event           state target
-FSM_TRANSITION_CREATE(printers,   ST_PRINT_JOBS,    EV_PRINT,       ST_PRINTING)
-FSM_TRANSITION_CREATE(printers,   ST_PRINTERS,      EV_PRINT,       ST_PRINTING)
-FSM_TRANSITION_CREATE(printers,   ST_PRINTING,      EV_DONE,        FSM_ST_END)
-FSM_TRANSITION_CREATE(printers,   ST_PRINTING,      EV_DONE,        ST_PRINTERS)
+//                          sm name      State source      event           state target
+FSM_TRANSITION_JOIN_CREATE(printers,   ST_PRINT_JOBS,    EV_PRINT,       ST_PRINTING,  0)
+FSM_TRANSITION_JOIN_CREATE(printers,   ST_PRINTERS,      EV_PRINT,       ST_PRINTING,  0)
+FSM_TRANSITION_JOIN_CREATE(printers,   ST_PRINTING,      EV_DONE,        FSM_ST_END,   0)
+FSM_TRANSITION_JOIN_CREATE(printers,   ST_PRINTING,      EV_DONE,        ST_PRINTERS,  0)
 FSM_TRANSITION_CREATE(printers,   ST_PRINTING,      FSM_TIMEOUT_EV, ST_PRINTERS)
 FSM_TRANSITION_CREATE(printers,   ST_PRINTING,      FSM_TIMEOUT_EV, ST_FAIL)
-FSM_TRANSITION_CREATE(printers,   FSM_ST_USER,      FSM_ADD_TOKEN,  ST_PRINT_JOBS)
+FSM_TRANSITION_CREATE(printers,   FSM_ST_USER,      EV_PRINT_JOB,   ST_PRINT_JOBS)
 FSM_TRANSITIONS_END()
 
 
@@ -99,7 +100,7 @@ int main() {
     ret |= fsm_run(&printers);
     
     // Starts printing
-    fsm_token_give(&printers, &FSM_STATE_GET(printers, ST_PRINT_JOBS), 1, &job_1);
+    fsm_token_give(&printers, EV_PRINT_JOB, 1, &job_1);
     fsm_dispatch(&printers, EV_PRINT_START, NULL);
     
     // Running the FSM
