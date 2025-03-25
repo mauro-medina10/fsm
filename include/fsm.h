@@ -214,12 +214,17 @@ typedef void (*fsm_action_t)(fsm_t* self, void* data);
 
 // TODO: States now will have a tokens parameter, could be uint8_t or uint16_t
 // but maybe token should be a pointer to a struct with more info
+struct fsm_timed_trans_t
+{
+    uint32_t t_period;
+    uint32_t t_count;
+};
+
 struct fsm_state_t {
     
     int id;
     
-    uint32_t t_period;
-    uint32_t t_count;
+    struct fsm_timed_trans_t timer;
     
     fsm_state_t* parent;
     fsm_state_t* default_substate;
@@ -236,7 +241,11 @@ typedef struct {
     fsm_action_t    transition_action;
 } fsm_transition_t;
 
+<<<<<<< HEAD
 // TODO: For smart events, probably need to make source and target states a matrix
+=======
+
+>>>>>>> main
 typedef struct {
     fsm_state_t* source_state[FSM_MAX_TRANSITIONS+1];
     fsm_action_t transition_action[FSM_MAX_TRANSITIONS+1];
