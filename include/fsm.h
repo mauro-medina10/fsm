@@ -210,12 +210,17 @@ typedef struct fsm_state_t fsm_state_t;
 typedef struct fsm_t fsm_t;
 typedef void (*fsm_action_t)(fsm_t* self, void* data);
 
+struct fsm_timed_trans_t
+{
+    uint32_t t_period;
+    uint32_t t_count;
+};
+
 struct fsm_state_t {
     
     int id;
     
-    uint32_t t_period;
-    uint32_t t_count;
+    struct fsm_timed_trans_t timer;
     
     fsm_state_t* parent;
     fsm_state_t* default_substate;
@@ -231,6 +236,7 @@ typedef struct {
     fsm_state_t* target_state;
     fsm_action_t transition_action;
 } fsm_transition_t;
+
 
 typedef struct {
     fsm_state_t* source_state[FSM_MAX_TRANSITIONS+1];

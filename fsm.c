@@ -75,7 +75,7 @@ static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data) {
         if (s->exit_action) {
             s->exit_action(fsm, data);
         }
-        s->t_count = s->t_period;
+        s->timer.t_count = s->timer.t_period;
     }
     // Actors: Excecute exit action of current state only
     for (size_t i = 0; ((i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL)); i++)
@@ -242,8 +242,8 @@ int fsm_timed_event_set(fsm_state_t *state, uint32_t ticks)
 {
     if(state == NULL) return -1;
 
-    state->t_period = ticks;
-    state->t_count = ticks;
+    state->timer.t_period = ticks;
+    state->timer.t_count = ticks;
 
     return 0;
 }
@@ -412,10 +412,10 @@ void fsm_ticks_hook(fsm_t *fsm)
 {
     struct fsm_events_t new_event = {FSM_TIMEOUT_EV, fsm->current_data};
 
-    if(fsm->current_state->t_count > 0)
+    if(fsm->current_state->timer.t_count > 0)
     {
-        fsm->current_state->t_count--;
-        if(fsm->current_state->t_count == 0) 
+        fsm->current_state->timer.t_count--;
+        if(fsm->current_state->timer.t_count == 0) 
         {
 #ifdef CONFIG_FREERTOS_API
             if(xPortInIsrContext())
