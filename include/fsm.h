@@ -293,6 +293,7 @@ struct fsm_t {
     int terminate_val;
     // Timer hook period (ticks / ms)
     uint32_t fsm_ms_ticks;
+    struct fsm_timed_trans_t timer;
     // Internal info
     uint32_t internal;
 };

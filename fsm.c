@@ -40,6 +40,7 @@ static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void 
     }
 
     fsm->current_state = (fsm_state_t*)state_target;
+    fsm->timer.t_count = fsm->current_state->timer.t_period;
     
     // Build path from target to LCA (exclusive)
     for (fsm_state_t* s = (fsm_state_t*)state_target; s != lca && s != NULL; s = s->parent) {
@@ -75,7 +76,6 @@ static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data) {
         if (s->exit_action) {
             s->exit_action(fsm, data);
         }
-        s->timer.t_count = s->timer.t_period;
     }
     // Actors: Excecute exit action of current state only
     for (size_t i = 0; ((i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL)); i++)
@@ -412,10 +412,10 @@ void fsm_ticks_hook(fsm_t *fsm)
 {
     struct fsm_events_t new_event = {FSM_TIMEOUT_EV, fsm->current_data};
 
-    if(fsm->current_state->timer.t_count > 0)
+    if(fsm->timer.t_count > 0)
     {
-        fsm->current_state->timer.t_count--;
-        if(fsm->current_state->timer.t_count == 0) 
+        fsm->timer.t_count--;
+        if(fsm->timer.t_count == 0) 
         {
 #ifdef CONFIG_FREERTOS_API
             if(xPortInIsrContext())
