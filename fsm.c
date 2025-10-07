@@ -369,13 +369,8 @@ int fsm_run(fsm_t *fsm)
     }
 
     // Actors
-    for (size_t i = 0; ((i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL)); i++)
-    {
-        for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
-        {
-            if((fsm->actors_table[i].actor[j].id == fsm->current_state->id) && (fsm->actors_table[i].actor[j].run_action != NULL)) fsm->actors_table[i].actor[j].run_action(fsm, fsm->current_data);
-        }
-    }
+    actor_action(fsm, fsm->current_state, ACTION_RUN, fsm->current_data);
+
     return 0;
 }
 
