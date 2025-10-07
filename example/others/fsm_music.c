@@ -127,7 +127,9 @@ FSM_TRANSITIONS_END()
 FSM_ACTOR_INIT(speaker_led)
 FSM_ACTOR_CREATE(ST_OFF, led_enter_off, NULL, NULL)
 FSM_ACTOR_CREATE(ST_ON, led_enter_on, NULL, NULL)
-FSM_ACTOR_CREATE(ST_PLAYING, NULL, led_run_playing, NULL)
+FSM_ACTOR_CREATE(ST_NORMAL, NULL, led_run_playing, NULL)
+FSM_ACTOR_CREATE(ST_SHUFFLE, NULL, led_run_playing, NULL)
+FSM_ACTOR_CREATE(ST_REPEAT, NULL, led_run_playing, NULL)
 FSM_ACTOR_END()
 
 // Action function implementations

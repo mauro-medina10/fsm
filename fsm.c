@@ -29,6 +29,32 @@ struct internal_ctx {
 
 static fsm_state_t* find_lca(fsm_state_t *s1, fsm_state_t *s2);
 
+static void actor_action(fsm_t *fsm, fsm_state_t *target, enum fsm_action_e action, void *data)
+{
+    // Get the relevant actor
+    for (size_t i = 0; ((i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL)); i++)
+    {
+        for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
+        {
+            if((fsm->actors_table[i].actor[j].id == target->id)) 
+            {
+                switch(action)
+                {
+                    case ACTION_ENTRY:
+                        if((fsm->actors_table[i].actor[j].entry_action != NULL)) fsm->actors_table[i].actor[j].entry_action(fsm, data);
+                    break;
+                    case ACTION_RUN:
+                        if((fsm->actors_table[i].actor[j].run_action != NULL)) fsm->actors_table[i].actor[j].run_action(fsm, data);
+                    break;
+                    case ACTION_EXIT:
+                        if((fsm->actors_table[i].actor[j].exit_action != NULL)) fsm->actors_table[i].actor[j].exit_action(fsm, data);
+                    break;
+                }
+            }
+        }
+    }
+}
+
 static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void *data) {
     fsm_state_t* state_path[MAX_HIERARCHY_DEPTH];
     fsm_state_t* state_target = (fsm_state_t*)target;
@@ -53,21 +79,16 @@ static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void 
         if (state_path[i]->entry_action) {
             state_path[i]->entry_action(fsm, data);
         }
+        // Actors
+        actor_action(fsm, state_path[i], ACTION_ENTRY, data);
     }
 
     // When source state is target state, execute entry action
     if((lca == state_target) && (depth == 0))
     {
         if(lca->entry_action) lca->entry_action(fsm, data);
-    }
-    
-    // Actors
-    for (size_t i = 0; ((i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL)); i++)
-    {
-        for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
-        {
-            if((fsm->actors_table[i].actor[j].id == target->id) && (fsm->actors_table[i].actor[j].entry_action != NULL)) fsm->actors_table[i].actor[j].entry_action(fsm, data);
-        }
+        // Actors
+        actor_action(fsm, state_target, ACTION_ENTRY, data);
     }
 }
 
@@ -76,14 +97,8 @@ static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data) {
         if (s->exit_action) {
             s->exit_action(fsm, data);
         }
-    }
-    // Actors: Excecute exit action of current state only
-    for (size_t i = 0; ((i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL)); i++)
-    {
-        for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
-        {
-            if((fsm->actors_table[i].actor[j].id == fsm->current_state->id) && (fsm->actors_table[i].actor[j].exit_action != NULL)) fsm->actors_table[i].actor[j].exit_action(fsm, data);
-        }
+        // Actors: Excecute exit action of current state only
+        actor_action(fsm, s, ACTION_EXIT, data);
     }
 }
 
