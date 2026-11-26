@@ -141,8 +141,8 @@ enum fsm_events_e
 #define FSM_CREATE_STATE(_name, _id, _parent, _sub, _entry, _run, _exit)                                \
 [_id] = {                                                                                               \
     .id               = (_id),                                                                          \
-    .parent           = ((_parent) == FSM_ST_NONE) ? NULL : &_name##_states[_parent],                   \
-    .default_substate = ((_sub) == FSM_ST_NONE) ? NULL : &_name##_states[_sub],                         \
+    .parent           = ((int)(_parent) == (int)FSM_ST_NONE) ? NULL : &_name##_states[_parent],         \
+    .default_substate = ((int)(_sub) == (int)FSM_ST_NONE) ? NULL : &_name##_states[_sub],               \
     .entry_action     = (_entry),                                                                       \
     .exit_action      = (_exit),                                                                        \
     .run_action       = (_run)                                                                          \
