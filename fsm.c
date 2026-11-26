@@ -57,8 +57,8 @@ static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void 
     fsm_state_t *state_target = target;
     int depth = 0;
 
-    // Check for default substate
-    while (state_target->default_substate != NULL) {
+    // Follow default substates (bounded against malformed cycles)
+    for (int step = 0; (state_target->default_substate != NULL) && (step < MAX_HIERARCHY_DEPTH); step++) {
         state_target = state_target->default_substate;
     }
 
@@ -66,35 +66,37 @@ static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void 
     fsm->timer.t_count = fsm->current_state->timer.t_period;
 
     // Build path from target to LCA (exclusive)
-    for (fsm_state_t *s = state_target; s != lca && s != NULL; s = s->parent) {
+    for (fsm_state_t *s = state_target; (s != lca) && (s != NULL); s = s->parent) {
         state_path[depth++] = s;
         if (depth >= MAX_HIERARCHY_DEPTH) break;
     }
 
-    // Execute entry actions from LCA (exclusive) to target state
+    // Execute entry actions from LCA (exclusive) down to target state
     for (int i = depth - 1; i >= 0; i--) {
         if (state_path[i]->entry_action != NULL) {
             state_path[i]->entry_action(fsm, data);
         }
         actor_action(fsm, state_path[i], ACTION_ENTRY, data);
-    }
-
-    // When source state is target state, execute entry action
-    if ((lca == state_target) && (depth == 0)) {
-        if (lca->entry_action != NULL) {
-            lca->entry_action(fsm, data);
+        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+            return;
         }
-        actor_action(fsm, state_target, ACTION_ENTRY, data);
     }
 }
 
-static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data)
+static void exit_state(fsm_t *fsm, fsm_state_t *lca, void *data)
 {
-    for (fsm_state_t *s = fsm->current_state; s != state && s != NULL; s = s->parent) {
+    int steps = 0;
+    for (fsm_state_t *s = fsm->current_state;
+         (s != lca) && (s != NULL) && (steps < MAX_HIERARCHY_DEPTH);
+         s = s->parent, steps++)
+    {
         if (s->exit_action != NULL) {
             s->exit_action(fsm, data);
         }
         actor_action(fsm, s, ACTION_EXIT, data);
+        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+            return;
+        }
     }
 }
 
@@ -105,16 +107,30 @@ static void transition_work(fsm_t *fsm, fsm_action_t action, void *data)
     }
 }
 
+static void execute_transition(fsm_t *fsm, fsm_state_t *source, fsm_state_t *target, fsm_action_t action, void *data)
+{
+    /* Self-transitions (source == target) exit and re-enter source symmetrically. */
+    fsm_state_t *lca = (source == target) ? source->parent : find_lca(fsm->current_state, target);
+
+    exit_state(fsm, lca, data);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return;
+    }
+
+    transition_work(fsm, action, data);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return;
+    }
+
+    enter_state(fsm, lca, target, data);
+}
+
 static uint8_t find_ancestor_depth(fsm_state_t *state, fsm_state_t *ancestor)
 {
     uint8_t depth = 0;
     fsm_state_t *s = state;
 
-    if (s == ancestor) {
-        return depth;
-    }
-
-    while (s->parent != NULL)
+    while ((s != NULL) && (depth <= MAX_HIERARCHY_DEPTH))
     {
         if (s == ancestor) {
             return depth;
@@ -127,50 +143,78 @@ static uint8_t find_ancestor_depth(fsm_state_t *state, fsm_state_t *ancestor)
 
 static void end_state(fsm_t *fsm, fsm_state_t *state, void *data)
 {
-    int ancestor_idx = -1;
+    fsm_state_t *search_state = state;
 
-    // Find an end event transition of an ancestor state
-    for (int i = 0; (i < FSM_MAX_TRANSITIONS + 1) && (fsm->smart_event[FSM_END_EV].source_state[i] != NULL); i++)
+    for (int chain = 0; (chain < MAX_HIERARCHY_DEPTH) && (search_state != NULL); chain++)
     {
+        int ancestor_idx = -1;
         uint8_t ancestor_depth = MAX_HIERARCHY_DEPTH + 1;
-        uint8_t depth = 0;
-        fsm_state_t *s = fsm->smart_event[FSM_END_EV].source_state[i];
 
-        // Check if s is an ancestor of state
-        if (find_lca(state, s) != s) continue;
+        // Find the closest ancestor with an FSM_END_EV transition
+        for (int i = 0; (i < FSM_MAX_TRANSITIONS + 1) && (fsm->smart_event[FSM_END_EV].source_state[i] != NULL); i++)
+        {
+            fsm_state_t *s = fsm->smart_event[FSM_END_EV].source_state[i];
+            uint8_t depth = find_ancestor_depth(search_state, s);
 
-        depth = find_ancestor_depth(state, s);
-        if (depth < ancestor_depth) {
-            ancestor_depth = depth;
-            ancestor_idx = i;
+            if (depth < ancestor_depth) {
+                ancestor_depth = depth;
+                ancestor_idx = i;
+            }
         }
-    }
 
-    // If no valid ancestor was found, terminate
-    if (ancestor_idx == -1) {
-        fsm_terminate(fsm, FSM_END_EV);
+        // If no valid ancestor handles FSM_END_EV, terminate the FSM
+        if (ancestor_idx == -1) {
+            fsm_terminate(fsm, FSM_END_EV);
+            return;
+        }
+
+        fsm_state_t *ancestor = fsm->smart_event[FSM_END_EV].source_state[ancestor_idx];
+        fsm_state_t *target   = fsm->smart_event[FSM_END_EV].target_state[ancestor_idx];
+        fsm_action_t action   = fsm->smart_event[FSM_END_EV].transition_action[ancestor_idx];
+
+        if (target->id == FSM_ST_END) {
+            // Chained completion: exit through ancestor, run action, and continue up to parent
+            exit_state(fsm, ancestor->parent, data);
+            if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+                return;
+            }
+            transition_work(fsm, action, data);
+            if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+                return;
+            }
+            fsm->current_state = ancestor->parent;
+            search_state = ancestor->parent;
+            continue;
+        }
+
+        execute_transition(fsm, ancestor, target, action, data);
         return;
     }
 
-    // Exit to the ancestor state and then enter the target state
-    exit_state(fsm, fsm->smart_event[FSM_END_EV].source_state[ancestor_idx], data);
-    transition_work(fsm, fsm->smart_event[FSM_END_EV].transition_action[ancestor_idx], data);
-    enter_state(fsm, fsm->smart_event[FSM_END_EV].source_state[ancestor_idx],
-                fsm->smart_event[FSM_END_EV].target_state[ancestor_idx], data);
+    fsm_terminate(fsm, FSM_END_EV);
 }
 
 static fsm_state_t *find_lca(fsm_state_t *s1, fsm_state_t *s2)
 {
-    fsm_state_t *a = s1, *b = s2;
-    while (a != b) {
-        if (a == NULL) a = s2;
-        else if (b == NULL) b = s1;
-        else {
+    if (s1 == NULL || s2 == NULL) {
+        return NULL;
+    }
+
+    fsm_state_t *a = s1;
+    fsm_state_t *b = s2;
+    int max_steps = 2 * (MAX_HIERARCHY_DEPTH + 1);
+
+    while ((a != b) && (max_steps-- > 0)) {
+        if (a == NULL) {
+            a = s2;
+        } else if (b == NULL) {
+            b = s1;
+        } else {
             a = a->parent;
             b = b->parent;
         }
     }
-    return a;
+    return (a == b) ? a : NULL;
 }
 
 static int fsm_smart_events_init(fsm_t *fsm)
@@ -238,7 +282,7 @@ int fsm_init(fsm_t *fsm,
         return -5;
     }
 #endif
-    enter_state(fsm, initial_state, initial_state, initial_data);
+    enter_state(fsm, NULL, initial_state, initial_data);
 
     return 0;
 }
@@ -338,20 +382,29 @@ static int fsm_process_events(fsm_t *fsm)
                 if (fsm->smart_event[current_event.event].source_state[i] == current &&
                     fsm->smart_event[current_event.event].target_state[i]->id == FSM_ST_END)
                 {
-                    end_state(fsm, fsm->smart_event[current_event.event].source_state[i], current_event.data);
-                }
-                else if (fsm->smart_event[current_event.event].source_state[i] == current)
-                {
-                    fsm_state_t *lca = find_lca(fsm->current_state, fsm->smart_event[current_event.event].target_state[i]);
-
-                    exit_state(fsm, lca, current_event.data);
                     transition_work(fsm, fsm->smart_event[current_event.event].transition_action[i], current_event.data);
-                    enter_state(fsm, lca, fsm->smart_event[current_event.event].target_state[i], current_event.data);
-
                     if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
                         return fsm->terminate_val;
                     }
+                    end_state(fsm, fsm->smart_event[current_event.event].source_state[i], current_event.data);
                     fsm->internal |= FSM_FLAG_HANDLED;
+                    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+                        return fsm->terminate_val;
+                    }
+                    break;
+                }
+                else if (fsm->smart_event[current_event.event].source_state[i] == current)
+                {
+                    execute_transition(fsm,
+                                       current,
+                                       fsm->smart_event[current_event.event].target_state[i],
+                                       fsm->smart_event[current_event.event].transition_action[i],
+                                       current_event.data);
+                    fsm->internal |= FSM_FLAG_HANDLED;
+                    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+                        return fsm->terminate_val;
+                    }
+                    break;
                 }
             }
             current = current->parent;
@@ -383,15 +436,27 @@ int fsm_run(fsm_t *fsm)
         return fsm->terminate_val;
     }
 
-    fsm_process_events(fsm);
+    int rc = fsm_process_events(fsm);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return fsm->terminate_val;
+    }
+    if (rc < 0) {
+        return rc;
+    }
 
     // Run state
     if (fsm->current_state->run_action != NULL) {
         fsm->current_state->run_action(fsm, fsm->current_data);
+        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+            return fsm->terminate_val;
+        }
     }
 
     // Actors
     actor_action(fsm, fsm->current_state, ACTION_RUN, fsm->current_data);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return fsm->terminate_val;
+    }
 
     return 0;
 }
