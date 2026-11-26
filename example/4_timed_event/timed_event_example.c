@@ -1,19 +1,25 @@
+/**
+ * @file timed_event_example.c
+ * @author Mauro Medina
+ * @brief Timed event blinker example with transition work callback
+ * @version 2.0.0
+ * @date 2025
+ *
+ * @copyright Copyright (c) 2025
+ */
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "fsm.h"
 
-/**
- * @brief MEF states
- * 
- */
+#define BLINK_PERIOD_MS 250U
+
 enum {
     ROOT_ST = FSM_ST_FIRST,
     OFF_ST,
     ON_ST,
 };
 
-/**
- * @brief MEF events
- * 
- */
 enum {
     ON_EV = FSM_EV_FIRST,
     OFF_EV,
@@ -22,53 +28,83 @@ enum {
 };
 
 // Action function prototypes
-static void enter_on(fsm_t *self, void* data);
-static void enter_off(fsm_t *self, void* data);
-
-static void timeout_work(fsm_t *self, void* data);
+static void enter_on(fsm_t *self, void *data);
+static void enter_off(fsm_t *self, void *data);
+static void timeout_work(fsm_t *self, void *data);
 
 // Define FSM states
 FSM_STATES_INIT(blinker)
-//                  name  state id  parent          sub            entry       run   exit
-FSM_CREATE_STATE(blinker, ROOT_ST,  FSM_ST_NONE,  OFF_ST,         NULL,       NULL, NULL)
-FSM_CREATE_STATE(blinker, OFF_ST,   ROOT_ST,      FSM_ST_NONE,    enter_off,  NULL, NULL)
-FSM_CREATE_STATE(blinker, ON_ST,    ROOT_ST,      FSM_ST_NONE,    enter_on,   NULL, NULL)
+//               name     state id  parent       sub          entry      run   exit
+FSM_CREATE_STATE(blinker, ROOT_ST,  FSM_ST_NONE, OFF_ST,      NULL,      NULL, NULL)
+FSM_CREATE_STATE(blinker, OFF_ST,   ROOT_ST,     FSM_ST_NONE, enter_off, NULL, NULL)
+FSM_CREATE_STATE(blinker, ON_ST,    ROOT_ST,     FSM_ST_NONE, enter_on,  NULL, NULL)
 FSM_STATES_END()
 
 // Define FSM transitions
 FSM_TRANSITIONS_INIT(blinker)
-//                    fsm name    State source   event           state target
-FSM_TRANSITION_CREATE(blinker,      OFF_ST,      ON_EV,          ON_ST)
-FSM_TRANSITION_CREATE(blinker,      ON_ST,       OFF_EV,         OFF_ST)
-FSM_TRANSITION_CREATE(blinker,      OFF_ST,      FSM_TIMEOUT_EV, ON_ST)
-//                          fsm name   State source        event       state target     transition work
-FSM_TRANSITION_WORK_CREATE(blinker,      ON_ST,       FSM_TIMEOUT_EV,    OFF_ST,       timeout_work)
+//                         fsm name  State source  event           state target  transition work
+FSM_TRANSITION_CREATE(     blinker,  OFF_ST,       ON_EV,          ON_ST)
+FSM_TRANSITION_CREATE(     blinker,  ON_ST,        OFF_EV,         OFF_ST)
+FSM_TRANSITION_CREATE(     blinker,  OFF_ST,       FSM_TIMEOUT_EV, ON_ST)
+FSM_TRANSITION_WORK_CREATE(blinker,  ON_ST,        FSM_TIMEOUT_EV, OFF_ST,       timeout_work)
 FSM_TRANSITIONS_END()
 
-/**
- * @brief User defined timer that is called every 1ms
- * 
- * @param data 
- */
+static void enter_on(fsm_t *self, void *data)
+{
+    (void)self;
+    (void)data;
+    printf("Blinker ON\n");
+}
+
+static void enter_off(fsm_t *self, void *data)
+{
+    (void)self;
+    (void)data;
+    printf("Blinker OFF\n");
+}
+
+static void timeout_work(fsm_t *self, void *data)
+{
+    (void)self;
+    (void)data;
+    printf("ON state timeout -> turning OFF\n");
+}
+
 static void periodic_timer_1ms(void *data)
 {
-    fsm_t *fsm = (fsm_t*) data;
-
+    fsm_t *fsm = (fsm_t *)data;
     fsm_ticks_hook(fsm);
-}   
+}
 
 int main(void)
 {
-    fsm_t blinker;
+    fsm_t blinker = {0};
+    int ret = 0;
 
-    // Inits the fsm, defines the timed period as 1 tick per ms
-    fsm_init(&blinker, FSM_TRANSITIONS_GET(blinker), FSM_TRANSITIONS_SIZE(blinker), LAST_EV, 1,
-            &FSM_STATE_GET(blinker, ROOT_ST), NULL);
+    printf("--- Starting Timed Event Blinker ---\n");
 
-    fsm_timed_event_set(&FSM_STATE_GET(blinker, ON_ST), BLINK_PERIOD);
-    fsm_timed_event_set(&FSM_STATE_GET(blinker, OFF_ST), BLINK_PERIOD);
+    ret = fsm_init(&blinker,
+                   FSM_TRANSITIONS_GET(blinker),
+                   FSM_TRANSITIONS_SIZE(blinker),
+                   LAST_EV,
+                   1,
+                   &FSM_STATE_GET(blinker, ROOT_ST),
+                   NULL);
+    if (ret != 0) {
+        return EXIT_FAILURE;
+    }
 
-    while(1);
+    // Setting OFF_ST timer after fsm_init() immediately arms the active state
+    fsm_timed_event_set(&blinker, &FSM_STATE_GET(blinker, ON_ST),  FSM_MS_2_TICKS(&blinker, BLINK_PERIOD_MS));
+    fsm_timed_event_set(&blinker, &FSM_STATE_GET(blinker, OFF_ST), FSM_MS_2_TICKS(&blinker, BLINK_PERIOD_MS));
 
-    return 0;
+    for (unsigned int ms = 0; ms < 1000U; ms++) {
+        periodic_timer_1ms(&blinker);
+        if (fsm_has_pending_events(&blinker) > 0) {
+            ret |= fsm_run(&blinker);
+        }
+    }
+
+    fsm_deinit(&blinker);
+    return ret;
 }
