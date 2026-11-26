@@ -14,6 +14,7 @@ $(TARGET): $(SRCS) ../include/fsm.h ../include/ring_buff.h
 
 run: $(TARGET)
 	./$(TARGET)
+	python3 test_mermaid.py -v
 
 clean:
 	rm -f $(TARGET)

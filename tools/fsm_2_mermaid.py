@@ -1,208 +1,225 @@
-# Author Mauro Medina <mauro93medina@gmail.com>
+#!/usr/bin/env python3
+"""Command-line Mermaid stateDiagram-v2 generator for the C FSM library.
 
-"""Command-line state machine graph builder library
-
-This script takes a .c file that implemets a finite state machine using the FSM library macros:
-
+Parses C files using the FSM library macros:
     * FSM_STATES_INIT
     * FSM_CREATE_STATE
     * FSM_TRANSITIONS_INIT
     * FSM_TRANSITION_CREATE
     * FSM_TRANSITION_WORK_CREATE
-    
-Usage: Call script from command line 
+    * FSM_TRANSITION_GUARD_CREATE
 
-    - python fsm_2_mermaid file_name
-    
-    Where file_name is the .c file that implements the fsm (has to have FSM_CREATE_STATE and FSM_TRANSITION_CREATE somewhere)
-    
+Usage:
+    python3 tools/fsm_2_mermaid.py path/to/fsm_file.c [-o OUTPUT_DIR] [--stdout]
 """
-    
+
 import argparse
+from dataclasses import dataclass, field
+from pathlib import Path
 import re
+import sys
+from typing import Dict, List, Optional, Tuple
 
-class fsm_mermaid:   
 
-    mermaid_head = "```mermaid\n"
-    mermaid_format = "stateDiagram-v2\n"
-    mermaid_tail = "\n```"
-    
-    fsm_init_pat = r"FSM_STATES_INIT\((.+?)\)"
-    
-    fsm_st_none = "FSM_ST_NONE"
-    fsm_st_end = "FSM_ST_END"
-    fsm_st_first = "FSM_ST_FIRST"
-    
-    fsm_event_none = "FSM_EV_NONE"
-    fsm_event_end = "FSM_END_EV"
-    fsm_event_timeout = "FSM_TIMEOUT_EV"
-    fsm_event_first = "FSM_EV_FIRST"
-    
-    fsm_end_dict = {"FSM_END_EV" : "[*]", "FSM_ST_END" : "[*]"}
-    
-    def __init__(self, fname="example"):
-        
-        # Set up argument parser
-        parser = argparse.ArgumentParser(description="Create a mermaid graph from a fsm file.")
-        parser.add_argument("file_name", type=str, help="The name of the C file with the fsm.")
-        args = parser.parse_args()
+FSM_ST_NONE = "FSM_ST_NONE"
+FSM_END_MAP = {
+    "FSM_END_EV": "[*]",
+    "FSM_ST_END": "[*]",
+}
 
-        # Define the file name and content
-        self.file_name = args.file_name
 
-        #Count number of fsm in file
-        if self.fsm_count() == 0:
-            return None
-        
-        # Open the file in read mode 
-        with open(self.file_name+".c", "r") as file:
-            self.content = file.read()  # Reads all lines into a list
-            
-        # Iterate the number for number of fsm
-        for self.fsm_new in range(0, self.fsm_total):          
-            # Read and get the FSM
-            self.fsm_parse()
-            
-            # Opens or creates the file in write mode and add content
-            self.mermaid_file_write()
+@dataclass
+class StateNode:
+    name: str
+    parent: str
+    default_substate: str
+    children: List[str] = field(default_factory=list)
 
-#------------------------------------------------------------------------------
-               
-    def fsm_count(self):
-        """Counts the number of fsm in file
-        """
-        # Initialize counter
-        self.fsm_total = 0
 
-        # Open and read the file
-        with open(self.file_name+".c", "r") as file:
-            for line in file:
-                # Check if the pattern is found in the line
-                if re.search(self.fsm_init_pat, line):
-                    self.fsm_total += 1
-         
-        return self.fsm_total
-    
-    def fsm_name_get(self):
-        # Get the fsm name
-        match = re.findall(self.fsm_init_pat, self.content)
+@dataclass
+class Transition:
+    source: str
+    event: str
+    target: str
+    guard: Optional[str] = None
+    work: Optional[str] = None
 
-        if match[self.fsm_new]:
-            self.fsm_name = match[self.fsm_new]
-        
-    def fsm_states_get(self):
-        pattern = rf"FSM_CREATE_STATE\({self.fsm_name},\s*(.+?)\)"
-        self.fsm_states = []
-        
-        # Get the fsm states
-        match = re.findall(pattern, self.content)
 
-        if match:
-            idx = 0
-            elements = match
-            for line in match:
-                elements[idx] = [item.strip() for item in line.split(',')]
-                idx = idx + 1
-            self.fsm_states = elements
-       
-    def fsm_transitions_get(self):
-        pattern = rf"FSM_TRANSITION_CREATE\({self.fsm_name},\s*(.+?)\)"
-        pattern_w = rf"FSM_TRANSITION_WORK_CREATE\({self.fsm_name},\s*(.+?)\)"
-        self.fsm_transitions = []
-        self.fsm_transitions_w = []
-        
-        # Get the fsm transitions
-        match = re.findall(pattern, self.content)
+def strip_c_comments(source: str) -> str:
+    """Remove C /* ... */ block comments and // line comments."""
+    no_block = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    no_line = re.sub(r"//[^\n]*", "", no_block)
+    return no_line
 
-        if match:
-            idx = 0
-            elements = match
-            for line in match:
-                elements[idx] = [item.strip() for item in line.split(',')]
-                idx = idx + 1
-                self.fsm_transitions = elements
-                
-        # Get the fsm transitions with work
-        match_w = re.findall(pattern_w, self.content)
 
-        if match_w:
-            idx = 0
-            elements = match_w
-            for line in match_w:
-                elements[idx] = [item.strip() for item in line.split(',')]
-                idx = idx + 1
-                self.fsm_transitions_w = elements
-        
-    def fsm_states_parse(self):
-        self.fsm_st = []
-        element_list = []
-        idx = 0
-        
-        for element in self.fsm_states:
-            # Parent state
-            if element[2] != self.fsm_st_none:    
-                element_list.append(element[0])
-                element_list.append(element[2])
-                for new_el in self.fsm_states:  
-                    # Find sub state
-                    if new_el[1] == element[0]:
-                        element_list.append(new_el[0])
-            
-                # Add parent and sub states
-                self.fsm_st.append(element_list)
-                element_list = []
-    
-    def fsm_parse(self):  
-        # Get fsm name      
-        self.fsm_name_get()
-        
-        #Get states
-        self.fsm_states_get()
-        
-        # parse states 
-        self.fsm_states_parse()
-        
-        #Get transitions
-        self.fsm_transitions_get()
-        
-    def mermaid_file_write(self):
-        with open(self.fsm_name+".md", "w") as file:
-            # Head
-            file.write(self.mermaid_head)
-            file.write(self.mermaid_format)  
-            # States
-            for state in self.fsm_st:
-                file.write("\tstate ")
-                file.write(str(state[0]))
-                file.write(" {\n")
-                file.write("\t\t[*] --> ")
-                file.write(str(state[1])+"\n")
+def _split_macro_args(raw_args: str) -> List[str]:
+    return [arg.strip() for arg in raw_args.split(",")]
 
-                for sub in state[2:]:
-                    # write transitions of sub-states
-                    for trans in self.fsm_transitions[:]:
-                        if(trans[0] == sub):
-                            file.write(f"\t\t {str(sub)} --> {self.fsm_end_dict.get(trans[2], trans[2])} : {self.fsm_end_dict.get(trans[1], trans[1])}\n")
-                            # delete transition from self.fsm_transitions
-                            self.fsm_transitions.remove(trans)
-                    
-                file.write("\t}\n\n")
-            #Transitions
-            if self.fsm_transitions != []:
-                for trans in self.fsm_transitions:
-                    file.write(f"\t {trans[0]} --> {self.fsm_end_dict.get(trans[2], trans[2])} : {self.fsm_end_dict.get(trans[1], trans[1])}\n")
-            #Transitions with work
-            if self.fsm_transitions_w != []:
-                for trans in self.fsm_transitions_w:
-                    file.write(f"\t {trans[0]} --> {self.fsm_end_dict.get(trans[2], trans[2])} : {self.fsm_end_dict.get(trans[1], trans[1])} / {trans[3]}()\n")
-                   
-            #tail
-            file.write(self.mermaid_tail)
-                            
-#------------------------------------------------------------------------------
+
+def parse_fsms(c_source: str) -> Dict[str, Tuple[Dict[str, StateNode], List[Transition]]]:
+    """Parse all FSM definitions in C source text."""
+    clean = strip_c_comments(c_source)
+    fsm_names = [m.strip() for m in re.findall(r"FSM_STATES_INIT\(\s*([^)]+?)\s*\)", clean)]
+
+    result: Dict[str, Tuple[Dict[str, StateNode], List[Transition]]] = {}
+
+    for fsm_name in fsm_names:
+        escaped = re.escape(fsm_name)
+        states: Dict[str, StateNode] = {}
+
+        state_pat = rf"FSM_CREATE_STATE\(\s*{escaped}\s*,\s*(.*?)\)"
+        for raw in re.findall(state_pat, clean, flags=re.DOTALL):
+            parts = _split_macro_args(raw)
+            if len(parts) < 3:
+                continue
+            st_id, parent, default_sub = parts[0], parts[1], parts[2]
+            states[st_id] = StateNode(name=st_id, parent=parent, default_substate=default_sub)
+
+        for st in states.values():
+            if st.parent != FSM_ST_NONE and st.parent in states:
+                states[st.parent].children.append(st.name)
+
+        transitions: List[Transition] = []
+
+        # Preserve source order across all three transition macro variants
+        trans_pat = (
+            rf"(FSM_TRANSITION_CREATE|FSM_TRANSITION_WORK_CREATE|FSM_TRANSITION_GUARD_CREATE)"
+            rf"\(\s*{escaped}\s*,\s*(.*?)\)"
+        )
+        for macro, raw in re.findall(trans_pat, clean, flags=re.DOTALL):
+            parts = _split_macro_args(raw)
+            if macro == "FSM_TRANSITION_CREATE" and len(parts) >= 3:
+                transitions.append(Transition(source=parts[0], event=parts[1], target=parts[2]))
+            elif macro == "FSM_TRANSITION_WORK_CREATE" and len(parts) >= 4:
+                work = None if parts[3] == "NULL" else parts[3]
+                transitions.append(Transition(source=parts[0], event=parts[1], target=parts[2], work=work))
+            elif macro == "FSM_TRANSITION_GUARD_CREATE" and len(parts) >= 5:
+                guard = None if parts[3] == "NULL" else parts[3]
+                work = None if parts[4] == "NULL" else parts[4]
+                transitions.append(
+                    Transition(source=parts[0], event=parts[1], target=parts[2], guard=guard, work=work)
+                )
+
+        result[fsm_name] = (states, transitions)
+
+    return result
+
+
+def _format_transition(tr: Transition) -> str:
+    src = FSM_END_MAP.get(tr.source, tr.source)
+    dst = FSM_END_MAP.get(tr.target, tr.target)
+    ev = FSM_END_MAP.get(tr.event, tr.event)
+    label = ev
+    if tr.guard:
+        label += f" [{tr.guard}]"
+    if tr.work:
+        label += f" / {tr.work}()"
+    return f"{src} --> {dst} : {label}"
+
+
+def _ancestors(state_name: str, states: Dict[str, StateNode]) -> List[str]:
+    chain: List[str] = []
+    cur = state_name
+    seen = set()
+    while cur in states and cur not in seen:
+        seen.add(cur)
+        parent = states[cur].parent
+        if parent == FSM_ST_NONE or parent not in states:
+            break
+        chain.append(parent)
+        cur = parent
+    return chain
+
+
+def _enclosing_scope(tr: Transition, states: Dict[str, StateNode]) -> Optional[str]:
+    """Return the innermost composite state containing both endpoints (None = top level)."""
+    if tr.source not in states or tr.target not in states:
+        if tr.source in states and tr.target == "FSM_ST_END":
+            parent = states[tr.source].parent
+            return parent if parent in states else None
+        return None
+
+    src_anc = _ancestors(tr.source, states)
+    dst_anc = set(_ancestors(tr.target, states))
+    for anc in src_anc:
+        if anc in dst_anc:
+            return anc
+    return None
+
+
+def render_mermaid(states: Dict[str, StateNode], transitions: List[Transition]) -> str:
+    """Render a parsed FSM into a Mermaid stateDiagram-v2 markdown block."""
+    scoped_transitions: Dict[Optional[str], List[Transition]] = {}
+    for tr in transitions:
+        scope = _enclosing_scope(tr, states)
+        scoped_transitions.setdefault(scope, []).append(tr)
+
+    lines: List[str] = ["```mermaid", "stateDiagram-v2"]
+
+    def emit_state(st_name: str, indent: int) -> None:
+        st = states[st_name]
+        pad = "    " * indent
+        if st.children:
+            lines.append(f"{pad}state {st.name} {{")
+            if st.default_substate != FSM_ST_NONE:
+                lines.append(f"{pad}    [*] --> {st.default_substate}")
+            for child in st.children:
+                emit_state(child, indent + 1)
+            for tr in scoped_transitions.get(st.name, []):
+                lines.append(f"{pad}    {_format_transition(tr)}")
+            lines.append(f"{pad}}}")
+        else:
+            lines.append(f"{pad}{st.name}")
+
+    top_states = [st.name for st in states.values() if st.parent == FSM_ST_NONE or st.parent not in states]
+    for top in top_states:
+        emit_state(top, 1)
+
+    for tr in scoped_transitions.get(None, []):
+        lines.append(f"    {_format_transition(tr)}")
+
+    lines.append("```")
+    return "\n".join(lines) + "\n"
+
+
+def resolve_input_path(file_arg: str) -> Path:
+    path = Path(file_arg)
+    if path.is_file():
+        return path
+    with_ext = Path(f"{file_arg}.c")
+    if with_ext.is_file():
+        return with_ext
+    raise FileNotFoundError(f"Could not find input C file: '{file_arg}' (or '{with_ext}')")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Create Mermaid stateDiagram-v2 diagrams from a C FSM file.")
+    parser.add_argument("file_name", type=str, help="Path to the C file (with or without .c extension).")
+    parser.add_argument("-o", "--output-dir", type=str, default=".", help="Directory for generated .md files.")
+    parser.add_argument("--stdout", action="store_true", help="Print generated Mermaid diagrams to stdout instead of writing files.")
+    args = parser.parse_args(argv)
+
+    input_path = resolve_input_path(args.file_name)
+    source = input_path.read_text(encoding="utf-8")
+    fsms = parse_fsms(source)
+
+    if not fsms:
+        print(f"No FSM_STATES_INIT definitions found in {input_path}", file=sys.stderr)
+        return 1
+
+    out_dir = Path(args.output_dir)
+    for fsm_name, (states, transitions) in fsms.items():
+        diagram = render_mermaid(states, transitions)
+        if args.stdout:
+            print(diagram, end="")
+        else:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_file = out_dir / f"{fsm_name}.md"
+            out_file.write_text(diagram, encoding="utf-8")
+            print(f"Wrote {out_file}")
+
+    return 0
+
 
 if __name__ == "__main__":
-    
-    mv = fsm_mermaid()
-
-    raise SystemExit
+    raise SystemExit(main())
