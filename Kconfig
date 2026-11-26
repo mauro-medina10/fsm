@@ -36,11 +36,11 @@ menu "FSM Configuration"
         help
             Maximum number of actors that can be linked to a single FSM instance.
 
-    config FSM_MAX_TRANSITIONS
-        int "Maximum transitions per event"
+    config FSM_MAX_TIMED_STATES
+        int "Maximum timed states per FSM instance"
         default 8
         range 1 64
         help
-            Maximum number of transitions triggered by a single event ID.
+            Maximum number of states with independent timeout periods per FSM instance.
 
 endmenu

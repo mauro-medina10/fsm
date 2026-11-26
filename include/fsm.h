@@ -2,7 +2,7 @@
  * @file fsm.h
  * @author Mauro Medina
  * @brief Hierarchical Finite State Machine (FSM) library
- * @version 1.1.0
+ * @version 2.0.0
  * @date 2024-07-17
  *
  * @copyright Copyright (c) 2024
@@ -14,6 +14,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -75,12 +76,11 @@ extern "C" {
 #endif
 #endif
 
-#ifndef FSM_MAX_TRANSITIONS
-#ifdef CONFIG_FSM_MAX_TRANSITIONS
-#define FSM_MAX_TRANSITIONS CONFIG_FSM_MAX_TRANSITIONS
+#ifndef FSM_MAX_TIMED_STATES
+#ifdef CONFIG_FSM_MAX_TIMED_STATES
+#define FSM_MAX_TIMED_STATES CONFIG_FSM_MAX_TIMED_STATES
 #else
-// Max number of transitions for an event
-#define FSM_MAX_TRANSITIONS 8
+#define FSM_MAX_TIMED_STATES 8
 #endif
 #endif
 
@@ -123,8 +123,8 @@ enum fsm_events_e
 //	MACROS
 //----------------------------------------------------------------------
 
-// States table definition
-#define FSM_STATES_INIT(name) static fsm_state_t name##_states[] = { [FSM_ST_NONE] = {0}, [FSM_ST_END] = { .id = FSM_ST_END },
+// Immutable states table definition (stored in Flash/RODATA, multi-instance safe)
+#define FSM_STATES_INIT(name) static const fsm_state_t name##_states[] = { [FSM_ST_NONE] = {0}, [FSM_ST_END] = { .id = FSM_ST_END },
 #define FSM_STATES_END()      };
 
 /**
@@ -140,46 +140,53 @@ enum fsm_events_e
  */
 #define FSM_CREATE_STATE(_name, _id, _parent, _sub, _entry, _run, _exit)                                \
 [_id] = {                                                                                               \
-    .id = (_id),                                                                                        \
-    .parent = ((_parent) == FSM_ST_NONE) ? NULL : (fsm_state_t *)&_name##_states[_parent],              \
-    .default_substate = ((_sub) == FSM_ST_NONE) ? NULL : (fsm_state_t *)&_name##_states[_sub],          \
-    .entry_action = (_entry),                                                                           \
-    .exit_action = (_exit),                                                                             \
-    .run_action = (_run)                                                                                \
+    .id               = (_id),                                                                          \
+    .parent           = ((_parent) == FSM_ST_NONE) ? NULL : &_name##_states[_parent],                   \
+    .default_substate = ((_sub) == FSM_ST_NONE) ? NULL : &_name##_states[_sub],                         \
+    .entry_action     = (_entry),                                                                       \
+    .exit_action      = (_exit),                                                                        \
+    .run_action       = (_run)                                                                          \
 },
 
-// Transition table definition
-#define FSM_TRANSITIONS_INIT(name) static const fsm_transition_t name##_transitions[] = { [0] = {0},
+// Transition table definition (0-indexed, stored in Flash/RODATA)
+#define FSM_TRANSITIONS_INIT(name) static const fsm_transition_t name##_transitions[] = {
 #define FSM_TRANSITIONS_END()      };
 
 /**
  * @brief Internal helper macro to create a transition
  */
-#define FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _work) \
-{                                                                                   \
-    .source_state = (fsm_state_t *)&_name##_states[_source_id],                     \
-    .event = (_event),                                                              \
-    .target_state = (fsm_state_t *)&_name##_states[_target_id],                     \
-    .transition_action = (_work),                                                   \
+#define FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _guard, _work) \
+{                                                                                           \
+    .source_state      = &_name##_states[_source_id],                                       \
+    .event             = (_event),                                                          \
+    .target_state      = &_name##_states[_target_id],                                       \
+    .guard             = (_guard),                                                          \
+    .transition_action = (_work),                                                           \
 },
 
 /**
  * @brief Create a transition entry
  */
 #define FSM_TRANSITION_CREATE(_name, _source_id, _event, _target_id) \
-    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, NULL)
+    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, NULL, NULL)
 
 /**
  * @brief Create a transition entry with a transition action callback
  */
 #define FSM_TRANSITION_WORK_CREATE(_name, _source_id, _event, _target_id, _work) \
-    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _work)
+    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, NULL, _work)
+
+/**
+ * @brief Create a guarded transition entry with optional transition action callback
+ */
+#define FSM_TRANSITION_GUARD_CREATE(_name, _source_id, _event, _target_id, _guard, _work) \
+    FSM_TRANSITION_GENERAL_CREATE(_name, _source_id, _event, _target_id, _guard, _work)
 
 // Convert milliseconds to ticks using the FSM's configured tick rate (ticks/ms)
 #define FSM_MS_2_TICKS(fsm, ms) (((fsm)->fsm_ms_ticks) * (uint32_t)(ms))
 
-// Actor table definition
-#define FSM_ACTOR_INIT(name) static struct fsm_actor_t name##_actor[] = { [0] = {0},
+// Actor table definition (0-indexed, stored in Flash/RODATA)
+#define FSM_ACTOR_INIT(name) static const struct fsm_actor_t name##_actor[] = {
 #define FSM_ACTOR_END()      };
 
 /**
@@ -194,7 +201,7 @@ enum fsm_events_e
 },
 
 #define FSM_TRANSITIONS_GET(name)  name##_transitions
-#define FSM_TRANSITIONS_SIZE(name) ((sizeof(name##_transitions) / sizeof(name##_transitions[0])) - 1U)
+#define FSM_TRANSITIONS_SIZE(name) (sizeof(name##_transitions) / sizeof(name##_transitions[0]))
 
 #define FSM_STATE_GET(name, id) name##_states[id]
 
@@ -214,20 +221,13 @@ enum fsm_action_e
 typedef struct fsm_state_t fsm_state_t;
 typedef struct fsm_t fsm_t;
 typedef void (*fsm_action_t)(fsm_t *self, void *data);
-
-struct fsm_timed_trans_t
-{
-    uint32_t t_period;
-    uint32_t t_count;
-};
+typedef bool (*fsm_guard_t)(fsm_t *self, void *data);
 
 struct fsm_state_t {
     int id;
 
-    struct fsm_timed_trans_t timer;
-
-    fsm_state_t *parent;
-    fsm_state_t *default_substate;
+    const fsm_state_t *parent;
+    const fsm_state_t *default_substate;
 
     fsm_action_t entry_action;
     fsm_action_t exit_action;
@@ -235,17 +235,12 @@ struct fsm_state_t {
 };
 
 typedef struct {
-    fsm_state_t *source_state;
+    const fsm_state_t *source_state;
     uint32_t event;
-    fsm_state_t *target_state;
+    const fsm_state_t *target_state;
+    fsm_guard_t guard;
     fsm_action_t transition_action;
 } fsm_transition_t;
-
-typedef struct {
-    fsm_state_t *source_state[FSM_MAX_TRANSITIONS + 1];
-    fsm_action_t transition_action[FSM_MAX_TRANSITIONS + 1];
-    fsm_state_t *target_state[FSM_MAX_TRANSITIONS + 1];
-} fsm_smt_events_t;
 
 struct fsm_events_t
 {
@@ -254,28 +249,27 @@ struct fsm_events_t
 };
 
 struct fsm_actor_t {
-    // State relevant to actor
     int id;
-    // Work to be done
     fsm_action_t entry_action;
     fsm_action_t exit_action;
     fsm_action_t run_action;
 };
 
 typedef struct {
-    // Actor
-    struct fsm_actor_t *actor;
-    // Actor's number of states
+    const struct fsm_actor_t *actor;
     size_t len;
 } fsm_actors_net_t;
+
+struct fsm_state_timer_t {
+    int state_id;
+    uint32_t t_period;
+};
 
 struct fsm_t {
     // State transitions table
     const fsm_transition_t *transitions;
     // Total number of transitions
     size_t num_transitions;
-    // Total number of events
-    size_t num_events;
     // Event queue
 #if FSM_USE_FREERTOS_API
     QueueHandle_t event_queue;
@@ -284,19 +278,20 @@ struct fsm_t {
     struct ringbuff event_queue;
 #endif
     struct fsm_events_t events_buff[FSM_MAX_EVENTS];
-    // Events lookup table
-    fsm_smt_events_t smart_event[FSM_MAX_EVENTS + FSM_EV_FIRST];
     // Current active state
-    fsm_state_t *current_state;
+    const fsm_state_t *current_state;
     // Linked actors
     fsm_actors_net_t actors_table[FSM_MAX_ACTORS];
+    // Per-instance timed state periods
+    struct fsm_state_timer_t state_timers[FSM_MAX_TIMED_STATES];
     // User instance context data
     void *current_data;
     // Termination code
     int terminate_val;
     // Timer hook rate (ticks / ms)
     uint32_t fsm_ms_ticks;
-    struct fsm_timed_trans_t timer;
+    // Active state countdown timer (ticks remaining)
+    uint32_t timer_count;
     // Internal status flags
     uint32_t internal;
 };
@@ -311,7 +306,7 @@ struct fsm_t {
  * @param fsm               FSM pointer
  * @param transitions       Transitions table pointer
  * @param num_transitions   Number of transitions in the table
- * @param num_events        Number of events in the FSM
+ * @param num_events        (Deprecated/informational) Number of events in the FSM
  * @param time_period_ticks Timer hook rate (ticks / ms), can be 0
  * @param initial_state     Default initial state
  * @param initial_data      User custom context data pointer
@@ -322,7 +317,7 @@ int fsm_init(fsm_t *fsm,
              size_t num_transitions,
              size_t num_events,
              uint32_t time_period_ticks,
-             fsm_state_t *initial_state,
+             const fsm_state_t *initial_state,
              void *initial_data);
 
 /**
@@ -340,16 +335,36 @@ void fsm_deinit(fsm_t *fsm);
  * @param size  Number of entries in actor table (must be > 0)
  * @return 0 on success, negative error code on failure
  */
-int fsm_actor_link(fsm_t *fsm, struct fsm_actor_t *actor, int size);
+int fsm_actor_link(fsm_t *fsm, const struct fsm_actor_t *actor, size_t size);
 
 /**
- * @brief Set the timeout period in ticks for a state.
+ * @brief Configure a per-instance timeout period in ticks for a state.
  *
+ * If the configured state is currently active (or an ancestor of the active state),
+ * the active countdown is immediately armed/updated. Pass ticks = 0 to disable.
+ *
+ * @param fsm   FSM pointer
  * @param state State where the timed transition is configured
- * @param ticks Ticks to wait before triggering FSM_TIMEOUT_EV
+ * @param ticks Ticks to wait before triggering FSM_TIMEOUT_EV (0 to disable)
  * @return 0 on success, negative error code on failure
  */
-int fsm_timed_event_set(fsm_state_t *state, uint32_t ticks);
+int fsm_timed_event_set(fsm_t *fsm, const fsm_state_t *state, uint32_t ticks);
+
+/**
+ * @brief Get the user context data pointer associated with the FSM instance.
+ *
+ * @param fsm FSM pointer
+ * @return Context data pointer, or NULL if fsm is NULL
+ */
+void *fsm_data_get(const fsm_t *fsm);
+
+/**
+ * @brief Update the user context data pointer associated with the FSM instance.
+ *
+ * @param fsm  FSM pointer
+ * @param data New context data pointer
+ */
+void fsm_data_set(fsm_t *fsm, void *data);
 
 /**
  * @brief Enqueue an event for the state machine to process on the next fsm_run().
@@ -374,7 +389,7 @@ int fsm_run(fsm_t *fsm);
  * @param fsm FSM pointer
  * @return Active state ID, or FSM_ST_NONE if uninitialized/NULL
  */
-int fsm_state_get(fsm_t *fsm);
+int fsm_state_get(const fsm_t *fsm);
 
 /**
  * @brief Terminate the state machine with a status value.
@@ -390,7 +405,7 @@ void fsm_terminate(fsm_t *fsm, int val);
  * @param fsm FSM pointer
  * @return 1 if events are pending, 0 if empty, -1 on invalid pointer
  */
-int fsm_has_pending_events(fsm_t *fsm);
+int fsm_has_pending_events(const fsm_t *fsm);
 
 /**
  * @brief Discard all pending events in the queue.
