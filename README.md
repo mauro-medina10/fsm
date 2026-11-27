@@ -154,6 +154,13 @@ Build and run the host unit tests (with AddressSanitizer and UndefinedBehaviorSa
 make -C tests run
 ```
 
+## Project Evolution & AI-Assisted Development
+
+This repository is also a snapshot of how AI-assisted embedded engineering has evolved over a couple of years:
+
+- **v1.0 (2024–2025) — Conversational AI Assistance (Claude):** When this library was first built, Claude was used as an interactive design and coding partner — helping reason through tricky logic like the two-pointer Lowest Common Ancestor (`find_lca`) algorithm, double-checking hierarchical state machine architecture decisions, drafting docs, and generating Mermaid diagrams from state tables. The original README from that era is preserved in [README_LEGACY.md](README_LEGACY.md).
+- **v2.0 (2026) — Agentic Engineering (Antigravity):** Returning to this repo with a new generation of agentic AI fundamentally changed the development methodology. Instead of pasting isolated functions into a chat window, the workflow shifted to pointing the agent (Google Antigravity) at the whole codebase to perform a full architectural review, surface memory-safety/HSM/concurrency bugs across C, Kconfig, CMake, examples, and Python tooling, and execute a multi-commit overhaul — shrinking per-instance RAM by >90%, fixing every example, building an ASan/UBSan test suite to validate each change along the way, and handling the git branch, push, and PR workflow end-to-end.
+
 ## License
 
 MIT License — Copyright (c) 2024 Mauro Medina
