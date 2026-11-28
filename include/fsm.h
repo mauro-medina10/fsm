@@ -303,6 +303,9 @@ struct fsm_t {
 /**
  * @brief Initialize the state machine object.
  *
+ * @note Must not be called on an already active FSM instance without calling
+ *       fsm_deinit() first.
+ *
  * @param fsm               FSM pointer
  * @param transitions       Transitions table pointer
  * @param num_transitions   Number of transitions in the table
@@ -369,6 +372,9 @@ void fsm_data_set(fsm_t *fsm, void *data);
 /**
  * @brief Enqueue an event for the state machine to process on the next fsm_run().
  *
+ * @note In bare-metal mode (FSM_USE_FREERTOS_API == 0), the underlying ring buffer
+ *       is not interrupt-safe; wrap concurrent ISR/main calls in a critical section.
+ *
  * @param fsm   FSM pointer
  * @param event Event ID
  * @param data  Optional per-event payload
@@ -378,8 +384,12 @@ void fsm_dispatch(fsm_t *fsm, uint32_t event, void *data);
 /**
  * @brief Process all pending events and execute the current state's run action once.
  *
+ * @note Non-reentrant: returns -2 if invoked recursively while already running.
+ *       In bare-metal mode, serialize queue access against ISR producers.
+ *
  * @param fsm FSM pointer
- * @return 0 on normal execution, terminate_val if terminated, negative on error
+ * @return 0 on normal execution, terminate_val if terminated, -1 on invalid pointer,
+ *         -2 if re-entered while already running
  */
 int fsm_run(fsm_t *fsm);
 
@@ -418,6 +428,8 @@ void fsm_flush_events(fsm_t *fsm);
 
 /**
  * @brief Advance the FSM tick counter and enqueue FSM_TIMEOUT_EV on expiration.
+ *
+ * @note In bare-metal mode, wrap concurrent ISR/main calls in a critical section.
  *
  * @param fsm FSM pointer
  */

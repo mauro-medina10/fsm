@@ -162,6 +162,31 @@ static void test_ringbuff_put_first_and_full_preservation(void)
     ASSERT_EQ_INT(10, (int)out);
     ASSERT_EQ_INT(0, (int)ringbuff_num(&rb));
 
+    /* Verify full-buffer put_first across every wrap-around sentinel offset (0..3) */
+    for (uint32_t offset = 0; offset < 4U; offset++) {
+        ASSERT_EQ_INT(0, ringbuff_init(&rb, storage, 4, sizeof(uint32_t)));
+        for (uint32_t k = 0; k < offset; k++) {
+            ASSERT_EQ_INT(0, ringbuff_put(&rb, &k));
+            ASSERT_EQ_INT(0, ringbuff_get(&rb, &out));
+        }
+        uint32_t a = 1, b = 2, c = 3, prio = 77;
+        ASSERT_EQ_INT(0, ringbuff_put(&rb, &a));
+        ASSERT_EQ_INT(0, ringbuff_put(&rb, &b));
+        ASSERT_EQ_INT(0, ringbuff_put(&rb, &c));
+        ASSERT_EQ_INT(3, (int)ringbuff_num(&rb));
+
+        /* Full buffer [1, 2, 3] + put_first(77) -> [77, 1, 2] */
+        ASSERT_EQ_INT(0, ringbuff_put_first(&rb, &prio));
+        ASSERT_EQ_INT(3, (int)ringbuff_num(&rb));
+        ASSERT_EQ_INT(0, ringbuff_get(&rb, &out));
+        ASSERT_EQ_INT(77, (int)out);
+        ASSERT_EQ_INT(0, ringbuff_get(&rb, &out));
+        ASSERT_EQ_INT(1, (int)out);
+        ASSERT_EQ_INT(0, ringbuff_get(&rb, &out));
+        ASSERT_EQ_INT(2, (int)out);
+        ASSERT_EQ_INT(0, (int)ringbuff_num(&rb));
+    }
+
     /* Flush */
     ASSERT_EQ_INT(0, ringbuff_put(&rb, &v1));
     ASSERT_EQ_INT(0, (int)ringbuff_flush(&rb));
@@ -774,6 +799,74 @@ static void test_termination_in_every_phase_and_redispatch(void)
     fsm_deinit(&m);
 }
 
+static int g_reentrant_rc = 0;
+static int g_guard_calls = 0;
+
+static bool guard_count_once(fsm_t *s, void *d)
+{
+    (void)s;
+    (void)d;
+    g_guard_calls++;
+    return true;
+}
+
+static void reent_ent_b(fsm_t *s, void *d)
+{
+    (void)d;
+    /* Attempt illegal recursive fsm_run() inside an entry action */
+    g_reentrant_rc = fsm_run(s);
+}
+
+enum { R_A = FSM_ST_FIRST, R_B };
+enum { REV_GO = FSM_EV_FIRST, REV_LAST };
+
+FSM_STATES_INIT(reentfsm)
+FSM_CREATE_STATE(reentfsm, R_A, FSM_ST_NONE, FSM_ST_NONE, NULL,        NULL, NULL)
+FSM_CREATE_STATE(reentfsm, R_B, FSM_ST_NONE, FSM_ST_NONE, reent_ent_b, NULL, NULL)
+FSM_STATES_END()
+
+FSM_TRANSITIONS_INIT(reentfsm)
+FSM_TRANSITION_GUARD_CREATE(reentfsm, R_A, REV_GO, R_B, guard_count_once, NULL)
+FSM_TRANSITIONS_END()
+
+static void test_reentrancy_guard_and_clean_reinit(void)
+{
+    fsm_t m;
+    g_reentrant_rc = 0;
+    g_guard_calls = 0;
+
+    ASSERT_EQ_INT(0, fsm_init(&m, FSM_TRANSITIONS_GET(reentfsm), FSM_TRANSITIONS_SIZE(reentfsm), REV_LAST, 1, &FSM_STATE_GET(reentfsm, R_A), NULL));
+    ASSERT_EQ_INT(0, fsm_timed_event_set(&m, &FSM_STATE_GET(reentfsm, R_A), 5));
+
+    fsm_dispatch(&m, REV_GO, NULL);
+    ASSERT_EQ_INT(0, fsm_run(&m));
+    ASSERT_EQ_INT(R_B, fsm_state_get(&m));
+    ASSERT_EQ_INT(-2, g_reentrant_rc);
+    ASSERT_EQ_INT(1, g_guard_calls);
+
+    /* FSM_FLAG_RUNNING must be cleared after returning, so subsequent fsm_run() works */
+    ASSERT_EQ_INT(0, fsm_run(&m));
+
+    /* Terminate + enqueue leftover event, then deinit and cleanly re-init */
+    fsm_terminate(&m, 55);
+    fsm_dispatch(&m, REV_GO, NULL);
+    ASSERT_EQ_INT(55, fsm_run(&m));
+
+    fsm_deinit(&m);
+    g_guard_calls = 0;
+    ASSERT_EQ_INT(0, fsm_init(&m, FSM_TRANSITIONS_GET(reentfsm), FSM_TRANSITIONS_SIZE(reentfsm), REV_LAST, 1, &FSM_STATE_GET(reentfsm, R_A), NULL));
+    ASSERT_EQ_INT(R_A, fsm_state_get(&m));
+    ASSERT_EQ_INT(0, fsm_has_pending_events(&m));
+    /* Old timer from before deinit must not fire */
+    for (int i = 0; i < 10; i++) {
+        fsm_ticks_hook(&m);
+    }
+    ASSERT_EQ_INT(0, fsm_has_pending_events(&m));
+    ASSERT_EQ_INT(0, fsm_run(&m));
+
+    fsm_deinit(&m);
+}
+
 #if FSM_USE_FREERTOS_API
 static void test_freertos_isr_context_and_flush(void)
 {
@@ -826,6 +919,7 @@ int main(void)
     RUN_TEST(test_actors_hierarchy_and_limits);
     RUN_TEST(test_per_instance_timers_and_multi_instance);
     RUN_TEST(test_termination_in_every_phase_and_redispatch);
+    RUN_TEST(test_reentrancy_guard_and_clean_reinit);
 
     printf("\nSummary: %d tests run, %d failed (sizeof(fsm_t) = %zu bytes)\n",
            g_tests_run, g_tests_failed, sizeof(fsm_t));

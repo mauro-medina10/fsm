@@ -14,7 +14,7 @@
 #include "fsm.h"
 
 #define FSM_FLAG_TERMINATE (1U << 0)
-#define FSM_FLAG_HANDLED   (1U << 1)
+#define FSM_FLAG_RUNNING   (1U << 1)
 
 static const fsm_state_t *find_lca(const fsm_state_t *s1, const fsm_state_t *s2);
 static uint8_t find_ancestor_depth(const fsm_state_t *state, const fsm_state_t *ancestor);
@@ -411,11 +411,11 @@ static int fsm_process_events(fsm_t *fsm)
     while (ringbuff_get(&fsm->event_queue, &current_event) == 0) {
 #endif
         if (current_event.event != FSM_EV_NONE) {
-            fsm->internal &= ~FSM_FLAG_HANDLED;
+            bool handled = false;
 
             const fsm_state_t *current = fsm->current_state;
             int depth_steps = 0;
-            while (((fsm->internal & FSM_FLAG_HANDLED) == 0U) &&
+            while (!handled &&
                    (current != NULL) &&
                    (depth_steps < MAX_HIERARCHY_DEPTH))
             {
@@ -439,7 +439,7 @@ static int fsm_process_events(fsm_t *fsm)
                         execute_transition(fsm, t->source_state, t->target_state, t->transition_action, current_event.data);
                     }
 
-                    fsm->internal |= FSM_FLAG_HANDLED;
+                    handled = true;
                     if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
                         return fsm->terminate_val;
                     }
@@ -473,29 +473,42 @@ int fsm_run(fsm_t *fsm)
         return fsm->terminate_val;
     }
 
+    if ((fsm->internal & FSM_FLAG_RUNNING) != 0U) {
+        return -2;
+    }
+
+    fsm->internal |= FSM_FLAG_RUNNING;
+    int ret = 0;
+
     int rc = fsm_process_events(fsm);
     if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
-        return fsm->terminate_val;
+        ret = fsm->terminate_val;
+        goto out;
     }
     if (rc < 0) {
-        return rc;
+        ret = rc;
+        goto out;
     }
 
     // Run state
     if (fsm->current_state->run_action != NULL) {
         fsm->current_state->run_action(fsm, fsm->current_data);
         if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
-            return fsm->terminate_val;
+            ret = fsm->terminate_val;
+            goto out;
         }
     }
 
     // Actors
     actor_action(fsm, fsm->current_state, ACTION_RUN, fsm->current_data);
     if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
-        return fsm->terminate_val;
+        ret = fsm->terminate_val;
+        goto out;
     }
 
-    return 0;
+out:
+    fsm->internal &= ~FSM_FLAG_RUNNING;
+    return ret;
 }
 
 int fsm_state_get(const fsm_t *fsm)
