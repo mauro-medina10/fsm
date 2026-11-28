@@ -465,6 +465,33 @@ static int fsm_process_events(fsm_t *fsm)
     return 0;
 }
 
+static int fsm_run_inner(fsm_t *fsm)
+{
+    int rc = fsm_process_events(fsm);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return fsm->terminate_val;
+    }
+    if (rc < 0) {
+        return rc;
+    }
+
+    // Run state
+    if (fsm->current_state->run_action != NULL) {
+        fsm->current_state->run_action(fsm, fsm->current_data);
+        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+            return fsm->terminate_val;
+        }
+    }
+
+    // Actors
+    actor_action(fsm, fsm->current_state, ACTION_RUN, fsm->current_data);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return fsm->terminate_val;
+    }
+
+    return 0;
+}
+
 int fsm_run(fsm_t *fsm)
 {
     if (fsm == NULL || fsm->current_state == NULL) return -1;
@@ -478,35 +505,7 @@ int fsm_run(fsm_t *fsm)
     }
 
     fsm->internal |= FSM_FLAG_RUNNING;
-    int ret = 0;
-
-    int rc = fsm_process_events(fsm);
-    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
-        ret = fsm->terminate_val;
-        goto out;
-    }
-    if (rc < 0) {
-        ret = rc;
-        goto out;
-    }
-
-    // Run state
-    if (fsm->current_state->run_action != NULL) {
-        fsm->current_state->run_action(fsm, fsm->current_data);
-        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
-            ret = fsm->terminate_val;
-            goto out;
-        }
-    }
-
-    // Actors
-    actor_action(fsm, fsm->current_state, ACTION_RUN, fsm->current_data);
-    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
-        ret = fsm->terminate_val;
-        goto out;
-    }
-
-out:
+    int ret = fsm_run_inner(fsm);
     fsm->internal &= ~FSM_FLAG_RUNNING;
     return ret;
 }
