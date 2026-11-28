@@ -14,95 +14,34 @@ Usage:
 """
 
 import argparse
-from dataclasses import dataclass, field
 from pathlib import Path
-import re
 import sys
 from typing import Dict, List, Optional, Tuple
 
+# Ensure sibling tools/ modules can be imported whether invoked directly or loaded dynamically
+_TOOLS_DIR = str(Path(__file__).resolve().parent)
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
 
-FSM_ST_NONE = "FSM_ST_NONE"
+from fsm_parser import (  # noqa: E402
+    FSM_ST_NONE,
+    StateNode,
+    Transition,
+    parse_file,
+    resolve_input_path,
+    strip_c_comments,
+)
+
 FSM_END_MAP = {
     "FSM_END_EV": "[*]",
     "FSM_ST_END": "[*]",
 }
 
 
-@dataclass
-class StateNode:
-    name: str
-    parent: str
-    default_substate: str
-    children: List[str] = field(default_factory=list)
-
-
-@dataclass
-class Transition:
-    source: str
-    event: str
-    target: str
-    guard: Optional[str] = None
-    work: Optional[str] = None
-
-
-def strip_c_comments(source: str) -> str:
-    """Remove C /* ... */ block comments and // line comments."""
-    no_block = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
-    no_line = re.sub(r"//[^\n]*", "", no_block)
-    return no_line
-
-
-def _split_macro_args(raw_args: str) -> List[str]:
-    return [arg.strip() for arg in raw_args.split(",")]
-
-
 def parse_fsms(c_source: str) -> Dict[str, Tuple[Dict[str, StateNode], List[Transition]]]:
     """Parse all FSM definitions in C source text."""
-    clean = strip_c_comments(c_source)
-    fsm_names = [m.strip() for m in re.findall(r"FSM_STATES_INIT\(\s*([^)]+?)\s*\)", clean)]
-
-    result: Dict[str, Tuple[Dict[str, StateNode], List[Transition]]] = {}
-
-    for fsm_name in fsm_names:
-        escaped = re.escape(fsm_name)
-        states: Dict[str, StateNode] = {}
-
-        state_pat = rf"FSM_CREATE_STATE\(\s*{escaped}\s*,\s*(.*?)\)"
-        for raw in re.findall(state_pat, clean, flags=re.DOTALL):
-            parts = _split_macro_args(raw)
-            if len(parts) < 3:
-                continue
-            st_id, parent, default_sub = parts[0], parts[1], parts[2]
-            states[st_id] = StateNode(name=st_id, parent=parent, default_substate=default_sub)
-
-        for st in states.values():
-            if st.parent != FSM_ST_NONE and st.parent in states:
-                states[st.parent].children.append(st.name)
-
-        transitions: List[Transition] = []
-
-        # Preserve source order across all three transition macro variants
-        trans_pat = (
-            rf"(FSM_TRANSITION_CREATE|FSM_TRANSITION_WORK_CREATE|FSM_TRANSITION_GUARD_CREATE)"
-            rf"\(\s*{escaped}\s*,\s*(.*?)\)"
-        )
-        for macro, raw in re.findall(trans_pat, clean, flags=re.DOTALL):
-            parts = _split_macro_args(raw)
-            if macro == "FSM_TRANSITION_CREATE" and len(parts) >= 3:
-                transitions.append(Transition(source=parts[0], event=parts[1], target=parts[2]))
-            elif macro == "FSM_TRANSITION_WORK_CREATE" and len(parts) >= 4:
-                work = None if parts[3] == "NULL" else parts[3]
-                transitions.append(Transition(source=parts[0], event=parts[1], target=parts[2], work=work))
-            elif macro == "FSM_TRANSITION_GUARD_CREATE" and len(parts) >= 5:
-                guard = None if parts[3] == "NULL" else parts[3]
-                work = None if parts[4] == "NULL" else parts[4]
-                transitions.append(
-                    Transition(source=parts[0], event=parts[1], target=parts[2], guard=guard, work=work)
-                )
-
-        result[fsm_name] = (states, transitions)
-
-    return result
+    parsed = parse_file(c_source)
+    return {name: (fsm.states, fsm.transitions) for name, fsm in parsed.fsms.items()}
 
 
 def _format_transition(tr: Transition) -> str:
@@ -182,21 +121,15 @@ def render_mermaid(states: Dict[str, StateNode], transitions: List[Transition]) 
     return "\n".join(lines) + "\n"
 
 
-def resolve_input_path(file_arg: str) -> Path:
-    path = Path(file_arg)
-    if path.is_file():
-        return path
-    with_ext = Path(f"{file_arg}.c")
-    if with_ext.is_file():
-        return with_ext
-    raise FileNotFoundError(f"Could not find input C file: '{file_arg}' (or '{with_ext}')")
-
-
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Create Mermaid stateDiagram-v2 diagrams from a C FSM file.")
     parser.add_argument("file_name", type=str, help="Path to the C file (with or without .c extension).")
     parser.add_argument("-o", "--output-dir", type=str, default=".", help="Directory for generated .md files.")
-    parser.add_argument("--stdout", action="store_true", help="Print generated Mermaid diagrams to stdout instead of writing files.")
+    parser.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Print generated Mermaid diagrams to stdout instead of writing files.",
+    )
     args = parser.parse_args(argv)
 
     input_path = resolve_input_path(args.file_name)
@@ -220,6 +153,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     return 0
 
+
+__all__ = [
+    "StateNode",
+    "Transition",
+    "parse_fsms",
+    "render_mermaid",
+    "resolve_input_path",
+    "strip_c_comments",
+    "main",
+]
 
 if __name__ == "__main__":
     raise SystemExit(main())
