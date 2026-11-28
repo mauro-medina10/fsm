@@ -22,7 +22,7 @@ A lightweight, embeddable Hierarchical Finite State Machine (HSM) library in C11
 - `Kconfig` / `CMakeLists.txt`: ESP-IDF component configuration and build rules
 - `tools/fsm_2_mermaid.py`: Mermaid `stateDiagram-v2` generator
 - `tests/`: Host unit test suite (C tests with ASan/UBSan + Python tests for the Mermaid tool)
-- `example/`: Runnable examples (`1_led_onoff`, `2_led_blinky`, `3_button`, `4_timed_event`, `others/fsm_music.c`)
+- `example/`: Runnable examples (`1_led_onoff`, `2_led_blinky`, `3_button`, `4_timed_event`, `5_multi_led`, `6_comm_retry`, `others/fsm_music.c`)
 
 ## Quick Start
 
@@ -148,7 +148,7 @@ python3 tools/fsm_2_mermaid.py example/2_led_blinky/fsm_led.c --stdout
 
 ## Running Unit Tests
 
-Build and run the full host verification suite (bare-metal & FreeRTOS-mocked C unit tests with AddressSanitizer/UndefinedBehaviorSanitizer, all 5 examples compiled & executed as integration tests, and Mermaid generator tests):
+Build and run the full host verification suite (bare-metal & FreeRTOS-mocked C unit tests with AddressSanitizer/UndefinedBehaviorSanitizer, all 7 examples compiled & executed as integration tests, and Mermaid generator tests):
 
 ```bash
 make -C tests run

@@ -128,6 +128,31 @@ class TestExamples(unittest.TestCase):
         self.assertIn("state ST_PLAYING {", md)
         self.assertIn("state ST_MENU {", md)
 
+    def test_6_multi_led(self):
+        out = compile_and_run_example("example/5_multi_led/fsm_multi_led.c")
+        self.assertIn("Summary: STATUS toggles=3, ERROR toggles=1", out)
+        self.assertIn("[STATUS pin=2] leaving ON", out)
+        self.assertIn("[ERROR pin=5] ON (toggle #1)", out)
+
+        md = run_mermaid_on_example("example/5_multi_led/fsm_multi_led.c")
+        self.assertIn("state ST_ROOT {", md)
+        self.assertIn("ST_OFF --> ST_ON : FSM_TIMEOUT_EV", md)
+
+    def test_7_comm_retry(self):
+        out = compile_and_run_example("example/6_comm_retry/fsm_comm.c")
+        self.assertIn("Handshake timeout -> retry 1/2", out)
+        self.assertIn("State: CONNECTED (session opened)", out)
+        self.assertIn('RX msg #1: "HELLO_ESP" (watchdog reset)', out)
+        self.assertIn("Leaving CONNECTED (session closed)", out)
+        self.assertIn("Handshake failed after max retries", out)
+        self.assertIn("Terminated with code: 42 (rx=1)", out)
+
+        md = run_mermaid_on_example("example/6_comm_retry/fsm_comm.c")
+        self.assertIn("state ST_HANDSHAKE {", md)
+        self.assertIn("ST_SYNC --> [*] : EV_SYNC_OK", md)
+        self.assertIn("ST_HANDSHAKE --> ST_HANDSHAKE : FSM_TIMEOUT_EV [guard_can_retry] / work_inc_retry()", md)
+        self.assertIn("ST_HANDSHAKE --> ST_FAULT : FSM_TIMEOUT_EV [guard_retries_exhausted] / work_max_retries()", md)
+
 
 if __name__ == "__main__":
     unittest.main()
