@@ -20,6 +20,8 @@ A lightweight, embeddable Hierarchical Finite State Machine (HSM) library in C11
 - `include/fsm.h` / `fsm.c`: Core HSM declarations and implementation
 - `include/ring_buff.h` / `ring_buff.c`: Generic fixed-element-size ring buffer (bare-metal backend)
 - `Kconfig` / `CMakeLists.txt`: ESP-IDF component configuration and build rules
+- `tools/fsm_parser.py`: Shared line-aware C macro parser
+- `tools/fsm_check.py`: Static FSM linter & statechart validator (29 rules, `--strict`, JSON/GitHub Actions output)
 - `tools/fsm_2_mermaid.py`: Mermaid `stateDiagram-v2` generator
 - `tests/`: Host unit test suite (C tests with ASan/UBSan + Python tests for the Mermaid tool)
 - `example/`: Runnable examples (`1_led_onoff`, `2_led_blinky`, `3_button`, `4_timed_event`, `5_multi_led`, `6_comm_retry`, `others/fsm_music.c`)
@@ -136,6 +138,24 @@ All options can be set via `idf.py menuconfig` (`FSM Configuration`) or compile-
 
 > **Concurrency Note:** In bare-metal mode, `ring_buff` does not disable interrupts internally. If `fsm_dispatch()` or `fsm_ticks_hook()` is called from an ISR while `fsm_run()` runs in the main loop, either enable `CONFIG_FSM_USE_FREERTOS_API` or wrap queue calls in your platform's critical section.
 
+## Static FSM Linter (`tools/fsm_check.py`)
+
+Validate your C FSM definitions at build time before flashing — catches structural errors (`E001`–`E017`: duplicate states, undefined parents/substates/targets, parent/substate cycles, depth/timer/actor limit violations, shadowed unguarded transitions) and design warnings (`W001`–`W012`: unreachable states, dead-end leaves, unused state/event enums, mismatched timed states, orphan `FSM_END_EV`, dead composite `run_action`, unhandled `fsm_dispatch` events):
+
+```bash
+# Lint one file or recursively scan a directory
+python3 tools/fsm_check.py example/
+
+# Fail on warnings too (ideal for CI) and emit GitHub Actions annotations
+python3 tools/fsm_check.py --strict --format github example/
+
+# Suppress specific rules via CLI or inline comments (`// fsm-check: ignore W004`)
+python3 tools/fsm_check.py --ignore W004,W009 my_fsm.c
+
+# List all available rule codes
+python3 tools/fsm_check.py --list-rules
+```
+
 ## Generating Mermaid Diagrams
 
 Generate nested `stateDiagram-v2` diagrams directly from your C source files:
@@ -154,7 +174,7 @@ Build and run the full host verification suite (bare-metal & FreeRTOS-mocked C u
 make -C tests run
 ```
 
-Individual targets are also available: `run-unit`, `run-freertos`, `run-examples`, and `run-mermaid`.
+Individual targets are also available: `run-unit`, `run-freertos`, `run-examples`, `run-mermaid`, and `run-linter`.
 
 ## Project Evolution & AI-Assisted Development
 

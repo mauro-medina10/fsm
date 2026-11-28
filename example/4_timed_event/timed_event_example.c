@@ -23,7 +23,6 @@ enum {
 enum {
     ON_EV = FSM_EV_FIRST,
     OFF_EV,
-    TOGGLE_EV,
     LAST_EV,
 };
 

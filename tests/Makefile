@@ -5,7 +5,7 @@ LDFLAGS := -fsanitize=address,undefined
 TARGET_BAREMETAL := test_fsm
 TARGET_FREERTOS  := test_fsm_freertos
 
-.PHONY: all run run-unit run-freertos run-examples run-mermaid clean
+.PHONY: all run run-unit run-freertos run-examples run-mermaid run-linter clean
 
 all: $(TARGET_BAREMETAL) $(TARGET_FREERTOS)
 
@@ -27,7 +27,11 @@ run-examples:
 run-mermaid:
 	python3 -B test_mermaid.py -v
 
-run: run-unit run-freertos run-examples run-mermaid
+run-linter:
+	python3 -B test_linter.py -v
+	python3 -B ../tools/fsm_check.py --strict ../example/
+
+run: run-unit run-freertos run-examples run-mermaid run-linter
 
 clean:
 	rm -f $(TARGET_BAREMETAL) $(TARGET_FREERTOS)

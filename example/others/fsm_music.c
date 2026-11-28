@@ -38,8 +38,6 @@ enum {
     EV_PLAY,
     EV_PAUSE,
     EV_STOP,
-    EV_NEXT,
-    EV_PREV,
     EV_MODE_CHANGE,
     EV_MENU,
     EV_VOLUME_UP,
@@ -65,10 +63,7 @@ static void enter_volume_adjust(fsm_t *self, void *data);
 static void enter_playlist_select(fsm_t *self, void *data);
 static void enter_low_battery(fsm_t *self, void *data);
 
-static void run_root(fsm_t *self, void *data);
 static void run_off(fsm_t *self, void *data);
-static void run_on(fsm_t *self, void *data);
-static void run_playing(fsm_t *self, void *data);
 static void run_normal(fsm_t *self, void *data);
 static void run_shuffle(fsm_t *self, void *data);
 static void run_repeat(fsm_t *self, void *data);
@@ -86,10 +81,10 @@ static void led_run_playing(fsm_t *self, void *data);
 // Define FSM states
 FSM_STATES_INIT(music_player)
 //               name          state id            parent       sub          entry                  run                  exit
-FSM_CREATE_STATE(music_player, ST_ROOT,            FSM_ST_NONE, ST_OFF,      enter_root,            run_root,            NULL)
+FSM_CREATE_STATE(music_player, ST_ROOT,            FSM_ST_NONE, ST_OFF,      enter_root,            NULL,                NULL)
 FSM_CREATE_STATE(music_player, ST_OFF,             ST_ROOT,     FSM_ST_NONE, enter_off,             run_off,             NULL)
-FSM_CREATE_STATE(music_player, ST_ON,              ST_ROOT,     ST_PAUSED,   enter_on,              run_on,              NULL)
-FSM_CREATE_STATE(music_player, ST_PLAYING,         ST_ON,       ST_NORMAL,   enter_playing,         run_playing,         NULL)
+FSM_CREATE_STATE(music_player, ST_ON,              ST_ROOT,     ST_PAUSED,   enter_on,              NULL,                NULL)
+FSM_CREATE_STATE(music_player, ST_PLAYING,         ST_ON,       ST_NORMAL,   enter_playing,         NULL,                NULL)
 FSM_CREATE_STATE(music_player, ST_NORMAL,          ST_PLAYING,  FSM_ST_NONE, enter_normal,          run_normal,          NULL)
 FSM_CREATE_STATE(music_player, ST_SHUFFLE,         ST_PLAYING,  FSM_ST_NONE, enter_shuffle,         run_shuffle,         NULL)
 FSM_CREATE_STATE(music_player, ST_REPEAT,          ST_PLAYING,  FSM_ST_NONE, enter_repeat,          run_repeat,          NULL)
@@ -145,10 +140,7 @@ static void enter_volume_adjust(fsm_t *self, void *data)   { (void)self; (void)d
 static void enter_playlist_select(fsm_t *self, void *data) { (void)self; (void)data; printf("Entering PLAYLIST SELECT state\n"); }
 static void enter_low_battery(fsm_t *self, void *data)     { (void)self; (void)data; printf("Entering LOW BATTERY state\n"); }
 
-static void run_root(fsm_t *self, void *data)            { (void)self; (void)data; printf("Running ROOT state\n"); }
 static void run_off(fsm_t *self, void *data)             { (void)self; (void)data; printf("Music player is OFF\n"); }
-static void run_on(fsm_t *self, void *data)              { (void)self; (void)data; printf("Music player is ON\n"); }
-static void run_playing(fsm_t *self, void *data)         { (void)self; (void)data; printf("Music is playing\n"); }
 static void run_normal(fsm_t *self, void *data)          { (void)self; (void)data; printf("Playing in NORMAL mode\n"); }
 static void run_shuffle(fsm_t *self, void *data)         { (void)self; (void)data; printf("Playing in SHUFFLE mode\n"); }
 static void run_repeat(fsm_t *self, void *data)          { (void)self; (void)data; printf("Playing in REPEAT mode\n"); }

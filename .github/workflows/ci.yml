@@ -23,5 +23,9 @@ jobs:
         if: matrix.cc == 'clang'
         run: sudo apt-get update && sudo apt-get install -y clang
 
-      - name: Run unit tests (bare-metal + FreeRTOS mock), example tests, and Mermaid tests
+      - name: Run unit tests (bare-metal + FreeRTOS mock), example tests, Mermaid tests, and static linter
         run: make -C tests CC=${{ matrix.cc }} run
+
+      - name: Emit GitHub annotations from static FSM linter
+        if: matrix.cc == 'gcc'
+        run: python3 -B tools/fsm_check.py --strict --format github example/
