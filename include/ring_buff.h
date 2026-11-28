@@ -1,104 +1,110 @@
 /**
  * @file ring_buff.h
- * @author Mauro Medina 
- * @brief Ring-buffer library
- * @version 1.0.1
+ * @author Mauro Medina
+ * @brief Generic fixed-element-size ring buffer library
+ * @version 1.1.0
  * @date 2024-01-19
- * 
+ *
  * @copyright Copyright (c) 2024
- * 
  */
 
 #ifndef RING_BUFF_H_
 #define RING_BUFF_H_
+
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- * \addtogroup doc_driver_hal_utils_ringbuff
+ * @brief Ring buffer control structure.
  *
- * @{
- */
-
-/**
- * \brief Ring buffer element type
+ * Uses one sentinel slot to distinguish full from empty, so usable capacity
+ * is (len - 1) elements.
  */
 struct ringbuff {
-	uint8_t  *buf;           /** Buffer base address */
-	uint32_t len;          /** Buffer len */
-	uint32_t data_size;     /** Data size */
-	uint8_t *p_read;    /** Buffer read index */
-	uint8_t *p_write;   /** Buffer write index */
+	uint8_t *buf;        /**< Buffer base address */
+	uint32_t len;        /**< Total number of slots (must be >= 2) */
+	uint32_t data_size;  /**< Size of each element in bytes */
+	uint8_t *p_read;     /**< Buffer read pointer */
+	uint8_t *p_write;    /**< Buffer write pointer */
 };
 
 /**
- * \brief Ring buffer init
+ * @brief Initialize a ring buffer.
  *
- * \param[in] rb The pointer to a ring buffer structure instance
- * \param[in] buf Space to store the data
- * \param[in] len The buffer length, must be aligned with power of 2
+ * @param[in] rb        Pointer to ring buffer instance
+ * @param[in] buf       Backing storage of at least (len * data_size) bytes
+ * @param[in] len       Number of element slots (must be >= 2; usable capacity is len - 1)
+ * @param[in] data_size Size of each element in bytes (must be > 0)
  *
- * \return ERR_NONE on success, or an error code on failure.
+ * @return 0 on success, -1 on invalid arguments.
  */
 int32_t ringbuff_init(struct ringbuff *const rb, void *buf, uint32_t len, uint32_t data_size);
 
 /**
- * \brief Get one byte from ring buffer, the user needs to handle the concurrent
- * access on buffer via put/get/flush
+ * @brief Pop one element from the front of the ring buffer.
  *
- * \param[in] rb The pointer to a ring buffer structure instance
- * \param[in] data One byte space to store the read data
+ * The caller is responsible for synchronizing concurrent access across
+ * put/get/flush calls (e.g., ISR/task critical sections).
  *
- * \return ERR_NONE on success, or an error code on failure.
+ * @param[in]  rb   Pointer to ring buffer instance
+ * @param[out] data Destination buffer of at least rb->data_size bytes
+ *
+ * @return 0 on success, -1 if empty or invalid arguments.
  */
 int32_t ringbuff_get(struct ringbuff *const rb, void *data);
 
 /**
- * \brief Put one byte to ring buffer, the user needs to handle the concurrent access
- * on buffer via put/get/flush
+ * @brief Push one element to the back of the ring buffer.
  *
- * \param[in] rb The pointer to a ring buffer structure instance
- * \param[in] data One byte data to be put into ring buffer
+ * If the buffer is full, the oldest element is overwritten.
+ * The caller is responsible for synchronizing concurrent access.
  *
- * \return ERR_NONE on success, or an error code on failure.
+ * @param[in] rb   Pointer to ring buffer instance
+ * @param[in] data Pointer to element to copy into the ring buffer
+ *
+ * @return 0 on success, -1 on invalid arguments.
  */
-int32_t ringbuff_put(struct ringbuff *const rb, void *data);
+int32_t ringbuff_put(struct ringbuff *const rb, const void *data);
 
 /**
- * \brief Put data in front of buffer
+ * @brief Push one element to the front (priority position) of the ring buffer.
  *
- * \param[in] rb The pointer to a ring buffer structure instance
- * \param[in] data One byte data to be put into ring buffer
- * \param[in] priority 1: adds data to the front of the ring 
+ * If the buffer is full, the newest (tail) element is dropped to preserve
+ * queue integrity. The caller is responsible for synchronizing concurrent access.
  *
- * \return ERR_NONE on success, or an error code on failure.
+ * @param[in] rb   Pointer to ring buffer instance
+ * @param[in] data Pointer to element to copy into the front of the ring buffer
+ *
+ * @return 0 on success, -1 on invalid arguments.
  */
-int32_t ringbuff_put_first(struct ringbuff *const rb, void *data);
+int32_t ringbuff_put_first(struct ringbuff *const rb, const void *data);
 
 /**
- * \brief Return the element number of ring buffer
+ * @brief Return the number of elements currently stored in the ring buffer.
  *
- * \param[in] rb The pointer to a ring buffer structure instance
+ * @param[in] rb Pointer to ring buffer instance
  *
- * \return The number of elements in ring buffer [0, rb->size]
+ * @return Number of elements in [0, rb->len - 1], or 0 if invalid.
  */
 uint32_t ringbuff_num(const struct ringbuff *const rb);
 
 /**
- * \brief Flush ring buffer, the user needs to handle the concurrent access on buffer
- * via put/get/flush
+ * @brief Discard all elements currently in the ring buffer.
  *
- * \param[in] rb The pointer to a ring buffer structure instance
+ * The caller is responsible for synchronizing concurrent access.
  *
- * \return ERR_NONE on success, or an error code on failure.
+ * @param[in] rb Pointer to ring buffer instance
+ *
+ * @return 0 on success, (uint32_t)-1 on invalid arguments.
  */
 uint32_t ringbuff_flush(struct ringbuff *const rb);
-
-/**@}*/
 
 #ifdef __cplusplus
 }
 #endif
+
 #endif /* RING_BUFF_H_ */

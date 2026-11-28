@@ -1,122 +1,154 @@
 /**
  * @file fsm.c
  * @author Mauro Medina
- * @brief 
- * @version 1.0.1
+ * @brief Hierarchical Finite State Machine (FSM) implementation
+ * @version 2.0.0
  * @date 2024-07-17
- * 
+ *
  * @copyright Copyright (c) 2024
- * 
  */
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "fsm.h"
 
-#ifdef CONFIG_FREERTOS_API
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#else
-#include "ring_buff.h"
-#endif 
+#define FSM_FLAG_TERMINATE (1U << 0)
+#define FSM_FLAG_RUNNING   (1U << 1)
 
-struct internal_ctx {
-	int terminate:  1;
-	int is_exit:    1;
-    int handled:    1;
-};
+static const fsm_state_t *find_lca(const fsm_state_t *s1, const fsm_state_t *s2);
+static uint8_t find_ancestor_depth(const fsm_state_t *state, const fsm_state_t *ancestor);
 
-static fsm_state_t* find_lca(fsm_state_t *s1, fsm_state_t *s2);
-
-static void actor_action(fsm_t *fsm, fsm_state_t *target, enum fsm_action_e action, void *data)
+static uint32_t state_timer_period_get(const fsm_t *fsm, const fsm_state_t *state)
 {
-    // Get the relevant actor
-    for (size_t i = 0; ((i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL)); i++)
+    int steps = 0;
+    for (const fsm_state_t *s = state; (s != NULL) && (steps < MAX_HIERARCHY_DEPTH); s = s->parent, steps++)
+    {
+        for (size_t i = 0; i < FSM_MAX_TIMED_STATES; i++)
+        {
+            if ((fsm->state_timers[i].state_id == s->id) && (fsm->state_timers[i].t_period > 0U)) {
+                return fsm->state_timers[i].t_period;
+            }
+        }
+    }
+    return 0U;
+}
+
+static void actor_action(fsm_t *fsm, const fsm_state_t *target, enum fsm_action_e action, void *data)
+{
+    for (size_t i = 0; (i < FSM_MAX_ACTORS) && (fsm->actors_table[i].actor != NULL); i++)
     {
         for (size_t j = FSM_ACTOR_FIRST; j < fsm->actors_table[i].len; j++)
         {
-            if((fsm->actors_table[i].actor[j].id == target->id)) 
+            if (fsm->actors_table[i].actor[j].id == target->id)
             {
-                switch(action)
+                switch (action)
                 {
                     case ACTION_ENTRY:
-                        if((fsm->actors_table[i].actor[j].entry_action != NULL)) fsm->actors_table[i].actor[j].entry_action(fsm, data);
-                    break;
+                        if (fsm->actors_table[i].actor[j].entry_action != NULL) {
+                            fsm->actors_table[i].actor[j].entry_action(fsm, data);
+                        }
+                        break;
                     case ACTION_RUN:
-                        if((fsm->actors_table[i].actor[j].run_action != NULL)) fsm->actors_table[i].actor[j].run_action(fsm, data);
-                    break;
+                        if (fsm->actors_table[i].actor[j].run_action != NULL) {
+                            fsm->actors_table[i].actor[j].run_action(fsm, data);
+                        }
+                        break;
                     case ACTION_EXIT:
-                        if((fsm->actors_table[i].actor[j].exit_action != NULL)) fsm->actors_table[i].actor[j].exit_action(fsm, data);
-                    break;
+                        if (fsm->actors_table[i].actor[j].exit_action != NULL) {
+                            fsm->actors_table[i].actor[j].exit_action(fsm, data);
+                        }
+                        break;
                 }
             }
         }
     }
 }
 
-static void enter_state(fsm_t *fsm, fsm_state_t *lca, fsm_state_t *target, void *data) {
-    fsm_state_t* state_path[MAX_HIERARCHY_DEPTH];
-    fsm_state_t* state_target = (fsm_state_t*)target;
+static void enter_state(fsm_t *fsm, const fsm_state_t *lca, const fsm_state_t *target, void *data)
+{
+    const fsm_state_t *state_path[MAX_HIERARCHY_DEPTH];
+    const fsm_state_t *state_target = target;
     int depth = 0;
 
-    // Check for default substate
-    while (state_target->default_substate) {
+    // Follow default substates (bounded against malformed cycles)
+    for (int step = 0; (state_target->default_substate != NULL) && (step < MAX_HIERARCHY_DEPTH); step++) {
         state_target = state_target->default_substate;
     }
 
-    fsm->current_state = (fsm_state_t*)state_target;
-    fsm->timer.t_count = fsm->current_state->timer.t_period;
-    
+    fsm->current_state = state_target;
+    fsm->timer_count   = state_timer_period_get(fsm, fsm->current_state);
+
     // Build path from target to LCA (exclusive)
-    for (fsm_state_t* s = (fsm_state_t*)state_target; s != lca && s != NULL; s = s->parent) {
+    for (const fsm_state_t *s = state_target; (s != lca) && (s != NULL); s = s->parent) {
         state_path[depth++] = s;
         if (depth >= MAX_HIERARCHY_DEPTH) break;
     }
 
-    // Execute entry actions from LCA (exclusive) to target state
+    // Execute entry actions from LCA (exclusive) down to target state
     for (int i = depth - 1; i >= 0; i--) {
-        if (state_path[i]->entry_action) {
+        if (state_path[i]->entry_action != NULL) {
             state_path[i]->entry_action(fsm, data);
         }
-        // Actors
         actor_action(fsm, state_path[i], ACTION_ENTRY, data);
-    }
-
-    // When source state is target state, execute entry action
-    if((lca == state_target) && (depth == 0))
-    {
-        if(lca->entry_action) lca->entry_action(fsm, data);
-        // Actors
-        actor_action(fsm, state_target, ACTION_ENTRY, data);
+        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+            return;
+        }
     }
 }
 
-static void exit_state(fsm_t *fsm, fsm_state_t *state, void *data) {
-    for (fsm_state_t* s = fsm->current_state; s != state && s != NULL; s = s->parent) {
-        if (s->exit_action) {
+static void exit_state(fsm_t *fsm, const fsm_state_t *lca, void *data)
+{
+    int steps = 0;
+    for (const fsm_state_t *s = fsm->current_state;
+         (s != lca) && (s != NULL) && (steps < MAX_HIERARCHY_DEPTH);
+         s = s->parent, steps++)
+    {
+        if (s->exit_action != NULL) {
             s->exit_action(fsm, data);
         }
-        // Actors: Excecute exit action of current state only
         actor_action(fsm, s, ACTION_EXIT, data);
+        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+            return;
+        }
     }
 }
 
-static void transition_work(fsm_t *fsm, fsm_action_t action, void *data) {
-    if (action) {
+static void transition_work(fsm_t *fsm, fsm_action_t action, void *data)
+{
+    if (action != NULL) {
         action(fsm, data);
     }
 }
 
-static uint8_t find_ancestor_depth(fsm_state_t *state, fsm_state_t *ancestor) {
-    uint8_t depth = 0;
-    fsm_state_t *s = state;
+static void execute_transition(fsm_t *fsm,
+                               const fsm_state_t *source,
+                               const fsm_state_t *target,
+                               fsm_action_t action,
+                               void *data)
+{
+    /* Self-transitions (source == target) exit and re-enter source symmetrically. */
+    const fsm_state_t *lca = (source == target) ? source->parent : find_lca(fsm->current_state, target);
 
-    if (s == ancestor) {
-        return depth;
+    exit_state(fsm, lca, data);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return;
     }
 
-    while (s->parent != NULL) 
+    transition_work(fsm, action, data);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return;
+    }
+
+    enter_state(fsm, lca, target, data);
+}
+
+static uint8_t find_ancestor_depth(const fsm_state_t *state, const fsm_state_t *ancestor)
+{
+    uint8_t depth = 0;
+    const fsm_state_t *s = state;
+
+    while ((s != NULL) && (depth <= MAX_HIERARCHY_DEPTH))
     {
         if (s == ancestor) {
             return depth;
@@ -124,294 +156,397 @@ static uint8_t find_ancestor_depth(fsm_state_t *state, fsm_state_t *ancestor) {
         s = s->parent;
         depth++;
     }
-    return UINT8_MAX; // Not an ancestor;
+    return UINT8_MAX; // Not an ancestor
 }
 
-static void end_state(fsm_t *fsm, fsm_state_t *state, void *data) {
-    
-    int ancestor_idx = -1;
-    
-    // Find an end event transition of an ancestor state
-    for (int i = 0; (i < FSM_MAX_TRANSITIONS+1) && (fsm->smart_event[FSM_END_EV].source_state[i] != NULL); i++)
+static void end_state(fsm_t *fsm, const fsm_state_t *state, void *data)
+{
+    const fsm_state_t *search_state = state;
+
+    for (int chain = 0; (chain < MAX_HIERARCHY_DEPTH) && (search_state != NULL); chain++)
     {
-        uint8_t ancestor_depth = MAX_HIERARCHY_DEPTH+1;
-        uint8_t depth = 0;
-        fsm_state_t *s = fsm->smart_event[FSM_END_EV].source_state[i]; // has to be an ancestor state
-        
-        // Check if the s state is an ancestor of the current state
-        if((find_lca(state, s) != s)) continue;
-        
-        depth = find_ancestor_depth(state, s);
-        if(depth < ancestor_depth)
+        const fsm_transition_t *best = NULL;
+        uint8_t ancestor_depth = MAX_HIERARCHY_DEPTH + 1;
+
+        // Find the closest ancestor with a matching FSM_END_EV transition
+        for (size_t i = 0; i < fsm->num_transitions; i++)
         {
-            ancestor_depth = depth; 
-            ancestor_idx = i;
-        } 
-    }
-    // If no valid ancestor was found, terminate
-    if(ancestor_idx == -1) 
-    {
-        fsm_terminate(fsm, FSM_END_EV);
+            const fsm_transition_t *t = &fsm->transitions[i];
+            if (t->event != FSM_END_EV) {
+                continue;
+            }
+
+            uint8_t depth = find_ancestor_depth(search_state, t->source_state);
+            if (depth >= ancestor_depth) {
+                continue;
+            }
+
+            if ((t->guard != NULL) && !t->guard(fsm, data)) {
+                continue;
+            }
+
+            ancestor_depth = depth;
+            best = t;
+        }
+
+        // If no valid ancestor handles FSM_END_EV, terminate the FSM
+        if (best == NULL) {
+            fsm_terminate(fsm, FSM_END_EV);
+            return;
+        }
+
+        if (best->target_state->id == FSM_ST_END) {
+            // Chained completion: exit through ancestor, run action, and continue up to parent
+            exit_state(fsm, best->source_state->parent, data);
+            if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+                return;
+            }
+            transition_work(fsm, best->transition_action, data);
+            if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+                return;
+            }
+            fsm->current_state = best->source_state->parent;
+            search_state = best->source_state->parent;
+            continue;
+        }
+
+        execute_transition(fsm, best->source_state, best->target_state, best->transition_action, data);
         return;
     }
 
-    // exit to the ancestor state and then enter the target state
-    exit_state(fsm, fsm->smart_event[FSM_END_EV].source_state[ancestor_idx], data);
-    transition_work(fsm, fsm->smart_event[FSM_END_EV].transition_action[ancestor_idx], data);
-    enter_state(fsm, fsm->smart_event[FSM_END_EV].source_state[ancestor_idx], fsm->smart_event[FSM_END_EV].target_state[ancestor_idx], data);
+    fsm_terminate(fsm, FSM_END_EV);
 }
 
-/**
- * @brief Finds the least common ancestor state between two states
- * 
- * @param s1 Current state
- * @param s2 Target state
- * @return fsm_state_t* least common ancestor state
- */
-static fsm_state_t* find_lca(fsm_state_t *s1, fsm_state_t *s2) {
-    fsm_state_t *a = s1, *b = s2;
-    while (a != b) {
-        if (a == NULL) a = s2;
-        else if (b == NULL) b = s1;
-        else {
+static const fsm_state_t *find_lca(const fsm_state_t *s1, const fsm_state_t *s2)
+{
+    if (s1 == NULL || s2 == NULL) {
+        return NULL;
+    }
+
+    const fsm_state_t *a = s1;
+    const fsm_state_t *b = s2;
+    int max_steps = 2 * (MAX_HIERARCHY_DEPTH + 1);
+
+    while ((a != b) && (max_steps-- > 0)) {
+        if (a == NULL) {
+            a = s2;
+        } else if (b == NULL) {
+            b = s1;
+        } else {
             a = a->parent;
             b = b->parent;
         }
     }
-    return a;
+    return (a == b) ? a : NULL;
 }
 
-static void fsm_smart_events_init(fsm_t *fsm)
+int fsm_init(fsm_t *fsm,
+             const fsm_transition_t *transitions,
+             size_t num_transitions,
+             size_t num_events,
+             uint32_t time_period_ticks,
+             const fsm_state_t *initial_state,
+             void *initial_data)
 {
-    uint32_t idx = 0;
+    (void)num_events;
 
-    memset(fsm->smart_event, 0, sizeof(fsm_smt_events_t));
+    if (fsm == NULL || transitions == NULL || initial_state == NULL) return -1;
+    if (num_transitions == 0) return -2;
 
-    // Sorts transitions by event id
-    for (int i = FSM_EV_NONE+1; i <= (fsm->num_events+FSM_EV_FIRST); i++)
-    {
-        for (int j = 1; j <= fsm->num_transitions; j++)
+    for (size_t i = 0; i < num_transitions; i++) {
+        if ((transitions[i].source_state == NULL) ||
+            (transitions[i].target_state == NULL) ||
+            (transitions[i].event == FSM_EV_NONE))
         {
-            if(fsm->transitions[j].event == i)
-            {
-                fsm->smart_event[i].source_state[idx] = fsm->transitions[j].source_state;
-                fsm->smart_event[i].transition_action[idx] = fsm->transitions[j].transition_action;
-                fsm->smart_event[i].target_state[idx] = fsm->transitions[j].target_state;
-                if(++idx >= FSM_MAX_TRANSITIONS) break;
-            }
+            return -3;
         }
-        idx = 0;
     }
-    
-}
-
-int fsm_init(fsm_t *fsm, const fsm_transition_t *transitions, size_t num_transitions, size_t num_events, uint32_t time_period_ticks, fsm_state_t* initial_state, void *initial_data) {
-    struct internal_ctx *const internal = (void *)&fsm->internal;
-
-    if(fsm == NULL || transitions == NULL || initial_state == NULL) return -1;
-    if(num_transitions == 0) return -2;
 
     memset(fsm, 0, sizeof(fsm_t));
-    
-    fsm->transitions         = transitions;
-    fsm->num_transitions     = num_transitions;
-    fsm->num_events          = num_events;
-    fsm->terminate_val       = 0;   
-    internal->terminate      = false;
-    internal->is_exit        = false;
-    fsm->current_data        = initial_data;
-    fsm->fsm_ms_ticks        = time_period_ticks;
-    
-    fsm_smart_events_init(fsm);
 
-#ifdef CONFIG_FREERTOS_API
-    fsm->event_queue = xQueueCreate(FSM_MAX_EVENTS, sizeof(struct fsm_events_t));
-    if(fsm->event_queue == NULL) return -3;
+    fsm->transitions     = transitions;
+    fsm->num_transitions = num_transitions;
+    fsm->terminate_val   = 0;
+    fsm->internal        = 0;
+    fsm->current_data    = initial_data;
+    fsm->fsm_ms_ticks    = time_period_ticks;
+
+#if FSM_USE_FREERTOS_API
+    fsm->event_queue = xQueueCreateStatic(FSM_MAX_EVENTS,
+                                          sizeof(struct fsm_events_t),
+                                          (uint8_t *)fsm->events_buff,
+                                          &fsm->event_queue_storage);
+    if (fsm->event_queue == NULL) return -4;
 #else
-    ringbuff_init(&fsm->event_queue, fsm->events_buff, FSM_MAX_EVENTS, sizeof(struct fsm_events_t));
+    if (ringbuff_init(&fsm->event_queue, fsm->events_buff, FSM_MAX_EVENTS, sizeof(struct fsm_events_t)) != 0) {
+        return -4;
+    }
 #endif
-    enter_state(fsm, initial_state, initial_state, initial_data);
+    enter_state(fsm, NULL, initial_state, initial_data);
 
     return 0;
 }
 
-int fsm_actor_link(fsm_t *fsm, struct fsm_actor_t *actor, int size) {
-    
-    if(fsm == NULL || actor == NULL) return -1;
+void fsm_deinit(fsm_t *fsm)
+{
+    if (fsm == NULL) return;
 
-    for (uint16_t i = 0; i < FSM_MAX_ACTORS; i++)
+#if FSM_USE_FREERTOS_API
+    if (fsm->event_queue != NULL) {
+        vQueueDelete(fsm->event_queue);
+        fsm->event_queue = NULL;
+    }
+#else
+    ringbuff_flush(&fsm->event_queue);
+#endif
+    fsm->current_state   = NULL;
+    fsm->transitions     = NULL;
+    fsm->num_transitions = 0;
+    fsm->timer_count     = 0;
+    fsm->internal        = 0;
+}
+
+int fsm_actor_link(fsm_t *fsm, const struct fsm_actor_t *actor, size_t size)
+{
+    if (fsm == NULL || actor == NULL || size == 0U) return -1;
+
+    for (size_t i = 0; i < FSM_MAX_ACTORS; i++)
     {
-        // Search empty spot
-        if(fsm->actors_table[i].len == 0)
-        {
+        if (fsm->actors_table[i].len == 0U) {
             fsm->actors_table[i].actor = actor;
-            fsm->actors_table[i].len = size;
-
+            fsm->actors_table[i].len   = size;
             return 0;
         }
     }
     return -2;
 }
 
-int fsm_timed_event_set(fsm_state_t *state, uint32_t ticks)
+int fsm_timed_event_set(fsm_t *fsm, const fsm_state_t *state, uint32_t ticks)
 {
-    if(state == NULL) return -1;
+    if (fsm == NULL || state == NULL || state->id == FSM_ST_NONE) return -1;
 
-    state->timer.t_period = ticks;
-    state->timer.t_count = ticks;
+    size_t empty_slot = FSM_MAX_TIMED_STATES;
+    bool updated = false;
+
+    for (size_t i = 0; i < FSM_MAX_TIMED_STATES; i++)
+    {
+        if (fsm->state_timers[i].state_id == state->id) {
+            if (ticks == 0U) {
+                fsm->state_timers[i].state_id = FSM_ST_NONE;
+                fsm->state_timers[i].t_period = 0U;
+            } else {
+                fsm->state_timers[i].t_period = ticks;
+            }
+            updated = true;
+            break;
+        }
+        if ((empty_slot == FSM_MAX_TIMED_STATES) && (fsm->state_timers[i].state_id == FSM_ST_NONE)) {
+            empty_slot = i;
+        }
+    }
+
+    if (!updated && (ticks > 0U)) {
+        if (empty_slot == FSM_MAX_TIMED_STATES) {
+            return -2;
+        }
+        fsm->state_timers[empty_slot].state_id = state->id;
+        fsm->state_timers[empty_slot].t_period = ticks;
+    }
+
+    // If this state is currently active (or an active ancestor), refresh the active countdown
+    if ((fsm->current_state != NULL) && (find_ancestor_depth(fsm->current_state, state) != UINT8_MAX)) {
+        fsm->timer_count = state_timer_period_get(fsm, fsm->current_state);
+    }
 
     return 0;
 }
 
-void fsm_dispatch(fsm_t *fsm, uint32_t event, void *data) {
-    
-    if(fsm == NULL) return;
-    if(fsm->num_transitions == 0) return;
+void *fsm_data_get(const fsm_t *fsm)
+{
+    if (fsm == NULL) return NULL;
+    return fsm->current_data;
+}
 
-    struct fsm_events_t new_event = {event, data};
+void fsm_data_set(fsm_t *fsm, void *data)
+{
+    if (fsm == NULL) return;
+    fsm->current_data = data;
+}
 
-#ifdef CONFIG_FREERTOS_API
-    if(xPortInIsrContext())
-    {
+void fsm_dispatch(fsm_t *fsm, uint32_t event, void *data)
+{
+    if (fsm == NULL) return;
+    if (fsm->num_transitions == 0U || event == FSM_EV_NONE) return;
+
+    struct fsm_events_t new_event = { event, data };
+
+#if FSM_USE_FREERTOS_API
+    if (fsm->event_queue == NULL) return;
+    if (xPortInIsrContext()) {
         xQueueSendFromISR(fsm->event_queue, &new_event, NULL);
-    }else
-    {
+    } else {
         xQueueSend(fsm->event_queue, &new_event, 0);
     }
 #else
     ringbuff_put(&fsm->event_queue, &new_event);
-#endif    
+#endif
 }
 
-static int fsm_process_events(fsm_t *fsm) {
-    
-    if(fsm == NULL) return -1;
-    if(fsm->num_transitions == 0) return -2;
-
-    struct internal_ctx *const internal = (void *)&fsm->internal;
+static int fsm_process_events(fsm_t *fsm)
+{
+    if (fsm == NULL) return -1;
+    if (fsm->num_transitions == 0U || fsm->current_state == NULL) return -2;
 
     struct fsm_events_t current_event;
 
-#ifdef CONFIG_FREERTOS_API
+#if FSM_USE_FREERTOS_API
     int event_ready = 0;
-    if(xPortInIsrContext())
-    {
+    if (xPortInIsrContext()) {
         event_ready = xQueueReceiveFromISR(fsm->event_queue, &current_event, NULL);
-    }else
-    {
+    } else {
         event_ready = xQueueReceive(fsm->event_queue, &current_event, 0);
     }
-    while(event_ready) {
+    while (event_ready) {
 #else
     while (ringbuff_get(&fsm->event_queue, &current_event) == 0) {
-#endif    
-        internal->handled = 0;
+#endif
+        if (current_event.event != FSM_EV_NONE) {
+            bool handled = false;
 
-        fsm_state_t* current = fsm->current_state;
-        while (internal->handled == 0 && current != NULL) 
-        {
-            for (int i = 0; (i < FSM_MAX_TRANSITIONS+1) && (fsm->smart_event[current_event.event].source_state[i] != NULL); i++)
+            const fsm_state_t *current = fsm->current_state;
+            int depth_steps = 0;
+            while (!handled &&
+                   (current != NULL) &&
+                   (depth_steps < MAX_HIERARCHY_DEPTH))
             {
-                if(fsm->smart_event[current_event.event].source_state[i] == current && fsm->smart_event[current_event.event].target_state[i]->id == FSM_ST_END)
+                for (size_t i = 0; i < fsm->num_transitions; i++)
                 {
-                    end_state(fsm, fsm->smart_event[current_event.event].source_state[i], current_event.data);
-                }
-                else if(fsm->smart_event[current_event.event].source_state[i] == current)
-                {
-                    fsm_state_t* lca = find_lca(fsm->current_state, fsm->smart_event[current_event.event].target_state[i]);
+                    const fsm_transition_t *t = &fsm->transitions[i];
+                    if ((t->event != current_event.event) || (t->source_state != current)) {
+                        continue;
+                    }
+                    if ((t->guard != NULL) && !t->guard(fsm, current_event.data)) {
+                        continue;
+                    }
 
-                    exit_state(fsm, lca, current_event.data);
-                    transition_work(fsm, fsm->smart_event[current_event.event].transition_action[i], current_event.data);
-                    enter_state(fsm, lca, fsm->smart_event[current_event.event].target_state[i], current_event.data);
+                    if (t->target_state->id == FSM_ST_END) {
+                        transition_work(fsm, t->transition_action, current_event.data);
+                        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+                            return fsm->terminate_val;
+                        }
+                        end_state(fsm, t->source_state, current_event.data);
+                    } else {
+                        execute_transition(fsm, t->source_state, t->target_state, t->transition_action, current_event.data);
+                    }
 
-                    /* No need to continue if terminate was set in the exit action */
-                    if (internal->terminate) {
+                    handled = true;
+                    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
                         return fsm->terminate_val;
                     }
-                    internal->handled = 1;
+                    break;
                 }
+                current = current->parent;
+                depth_steps++;
             }
-            current = current->parent;
+
+            if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+                return fsm->terminate_val;
+            }
         }
-        
-        if (internal->terminate) {
-            return fsm->terminate_val;
-        }
-#ifdef CONFIG_FREERTOS_API        
-        if(xPortInIsrContext())
-        {
+
+#if FSM_USE_FREERTOS_API
+        if (xPortInIsrContext()) {
             event_ready = xQueueReceiveFromISR(fsm->event_queue, &current_event, NULL);
-        }else
-        {
+        } else {
             event_ready = xQueueReceive(fsm->event_queue, &current_event, 0);
         }
-#endif        
+#endif
     }
+    return 0;
+}
+
+static int fsm_run_inner(fsm_t *fsm)
+{
+    int rc = fsm_process_events(fsm);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return fsm->terminate_val;
+    }
+    if (rc < 0) {
+        return rc;
+    }
+
+    // Run state
+    if (fsm->current_state->run_action != NULL) {
+        fsm->current_state->run_action(fsm, fsm->current_data);
+        if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+            return fsm->terminate_val;
+        }
+    }
+
+    // Actors
+    actor_action(fsm, fsm->current_state, ACTION_RUN, fsm->current_data);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return fsm->terminate_val;
+    }
+
     return 0;
 }
 
 int fsm_run(fsm_t *fsm)
 {
-    if(fsm == NULL) return -1;
+    if (fsm == NULL || fsm->current_state == NULL) return -1;
 
-    struct internal_ctx *const internal = (void *)&fsm->internal;
-
-    /* No need to continue if terminate was set */
-	if (internal->terminate) {
-		return fsm->terminate_val;
-	}
-    
-    fsm_process_events(fsm);
-
-    // Run state
-    if (fsm->current_state->run_action) {
-        fsm->current_state->run_action(fsm, fsm->current_data);
+    if ((fsm->internal & FSM_FLAG_TERMINATE) != 0U) {
+        return fsm->terminate_val;
     }
 
-    // Actors
-    actor_action(fsm, fsm->current_state, ACTION_RUN, fsm->current_data);
+    if ((fsm->internal & FSM_FLAG_RUNNING) != 0U) {
+        return -2;
+    }
 
-    return 0;
+    fsm->internal |= FSM_FLAG_RUNNING;
+    int ret = fsm_run_inner(fsm);
+    fsm->internal &= ~FSM_FLAG_RUNNING;
+    return ret;
 }
 
-int fsm_state_get(fsm_t *fsm)
+int fsm_state_get(const fsm_t *fsm)
 {
-    if(fsm == NULL) return FSM_ST_NONE;
+    if (fsm == NULL || fsm->current_state == NULL) return FSM_ST_NONE;
 
     return fsm->current_state->id;
 }
 
 void fsm_terminate(fsm_t *fsm, int val)
 {
-    if(fsm == NULL) return;
+    if (fsm == NULL) return;
 
-    struct internal_ctx *const internal = (void *)&fsm->internal;
-
-    internal->terminate = true;
-    fsm->terminate_val = val;  
+    fsm->internal |= FSM_FLAG_TERMINATE;
+    fsm->terminate_val = val;
 }
 
-int fsm_has_pending_events(fsm_t *fsm) {
-    if(fsm == NULL) return -1;
+int fsm_has_pending_events(const fsm_t *fsm)
+{
+    if (fsm == NULL) return -1;
 
-#ifdef CONFIG_FREERTOS_API
-        if(xPortInIsrContext())
-        {
-            return uxQueueMessagesWaitingFromISR(fsm->event_queue) > 0;
-        }else
-        {
-            return uxQueueMessagesWaiting(fsm->event_queue) > 0;
-        }
+#if FSM_USE_FREERTOS_API
+    if (fsm->event_queue == NULL) return -1;
+    if (xPortInIsrContext()) {
+        return uxQueueMessagesWaitingFromISR(fsm->event_queue) > 0;
+    } else {
+        return uxQueueMessagesWaiting(fsm->event_queue) > 0;
+    }
 #else
-    return ringbuff_num(&fsm->event_queue) > 0;
+    return ringbuff_num(&fsm->event_queue) > 0U;
 #endif
 }
 
-void fsm_flush_events(fsm_t *fsm) {
-    
-    if(fsm == NULL) return;
+void fsm_flush_events(fsm_t *fsm)
+{
+    if (fsm == NULL) return;
 
-#ifdef CONFIG_FREERTOS_API
+#if FSM_USE_FREERTOS_API
+    if (fsm->event_queue == NULL || xPortInIsrContext()) return;
     xQueueReset(fsm->event_queue);
 #else
     ringbuff_flush(&fsm->event_queue);
@@ -420,27 +555,28 @@ void fsm_flush_events(fsm_t *fsm) {
 
 void fsm_ticks_hook(fsm_t *fsm)
 {
-    struct fsm_events_t new_event = {FSM_TIMEOUT_EV, fsm->current_data};
+    if (fsm == NULL || fsm->current_state == NULL) return;
 
-    if(fsm->timer.t_count > 0)
+    struct fsm_events_t new_event = { FSM_TIMEOUT_EV, fsm->current_data };
+
+    if (fsm->timer_count > 0U)
     {
-        fsm->timer.t_count--;
-        if(fsm->timer.t_count == 0) 
+        fsm->timer_count--;
+        if (fsm->timer_count == 0U)
         {
-#ifdef CONFIG_FREERTOS_API
-            if(xPortInIsrContext())
-            {
+#if FSM_USE_FREERTOS_API
+            if (fsm->event_queue == NULL) return;
+            if (xPortInIsrContext()) {
                 xQueueGenericSendFromISR(fsm->event_queue, &new_event, NULL, queueSEND_TO_FRONT);
-            }else
-            {
-                xQueueGenericSend(fsm->event_queue, &new_event, 0, queueSEND_TO_FRONT );
+            } else {
+                xQueueGenericSend(fsm->event_queue, &new_event, 0, queueSEND_TO_FRONT);
             }
 #else
             ringbuff_put_first(&fsm->event_queue, &new_event);
-#endif            
-#ifdef CONFIG_RUN_ON_TIMER_HOOK            
+#endif
+#if CONFIG_RUN_ON_TIMER_HOOK
             fsm_run(fsm);
-#endif            
+#endif
         }
     }
 }

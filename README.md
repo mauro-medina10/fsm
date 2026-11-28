@@ -1,213 +1,168 @@
-# Finite State Machine (FSM) Library
+# Hierarchical Finite State Machine (FSM) Library
 
 ## Overview
 
-This library provides a flexible and efficient implementation of a Finite State Machine (FSM) in C. It's designed to be easily integrated into embedded systems or any C project requiring state management.
+A lightweight, embeddable Hierarchical Finite State Machine (HSM) library in C11 designed for microcontrollers (ESP-IDF / FreeRTOS or bare-metal) and host C projects. State, transition, and actor tables are immutable (`const`) so they can reside in Flash/RODATA and be shared across multiple independent `fsm_t` instances.
 
 ## Features
 
-- Hierarchical state support
-- Event-driven transitions
-- Entry, exit, and run actions for states
-- Event queue with configurable size
-- Support for user-defined data associated with states and events
-- Efficient implementation suitable for embedded systems
+- Hierarchical states with default substates, LCA-based exit/entry ordering, event bubbling, and symmetric self-transitions
+- Entry, run, exit, and transition work callbacks
+- Optional transition guard predicates (`FSM_TRANSITION_GUARD_CREATE`)
+- Composite completion states (`FSM_ST_END` / `FSM_END_EV`) including chained completions
+- Per-instance timed state transitions (`fsm_timed_event_set`, `fsm_ticks_hook`, `FSM_TIMEOUT_EV`)
+- Decoupled observer "Actors" (`fsm_actor_link`) triggered along the hierarchy chain
+- Dual event queue backend: built-in zero-allocation ring buffer or statically allocated FreeRTOS queue (`CONFIG_FSM_USE_FREERTOS_API`)
+- Code-to-Mermaid diagram generator (`tools/fsm_2_mermaid.py`)
 
 ## Files
 
-- `fsm.h`: Main header file with FSM definitions and function declarations
-- `fsm.c`: Implementation of FSM functions
-- `ring_buff.h`: Ring buffer implementation used for the event queue
+- `include/fsm.h` / `fsm.c`: Core HSM declarations and implementation
+- `include/ring_buff.h` / `ring_buff.c`: Generic fixed-element-size ring buffer (bare-metal backend)
+- `Kconfig` / `CMakeLists.txt`: ESP-IDF component configuration and build rules
+- `tools/fsm_2_mermaid.py`: Mermaid `stateDiagram-v2` generator
+- `tests/`: Host unit test suite (C tests with ASan/UBSan + Python tests for the Mermaid tool)
+- `example/`: Runnable examples (`1_led_onoff`, `2_led_blinky`, `3_button`, `4_timed_event`, `5_multi_led`, `6_comm_retry`, `others/fsm_music.c`)
 
-## Key Concepts
+## Quick Start
 
-### States
-
-States are defined using the `fsm_state_t` structure, which includes:
-- State ID
-- Parent state (for hierarchical FSMs)
-- Default substate
-- Entry, exit, and run action function pointers
-
-### Transitions
-
-Transitions are defined using the `fsm_transition_t` structure, which includes:
-- Source state
-- Event triggering the transition
-- Target state
-- Transition action function pointer
-
-You can declare a transition using the two macros available:
-- FSM_TRANSITION_CREATE: creates a transition
-- FSM_TRANSITION_WORK_CREATE: creates a transition with an action function.
-
-### Events
-
-Events are simple integers that trigger state transitions. They can be associated with user-defined data.
-
-### Actors
-
-Actors in this FSM implementation represent logical entities or components that manage the behavior of specific states within the system. Each actor consists of a collection of states, with each state defined by:
-
-- **`id`**: A unique identifier for the state.
-- **`entry_action`**: A function executed when entering the state.
-- **`run_action`**: A function invoked while the state is active.
-- **`exit_action`**: A function called when exiting the state.
-
-Actors allow grouping related state behaviors and actions into cohesive units, making the FSM modular and easier to extend or modify. This design is particularly useful for systems where multiple independent or semi-independent components (e.g., a player, a menu, or a power manager) operate within the same FSM framework.
-
-Actors enable you to perform actions when specific states are active, and these states can belong to different FSMs. By using an array of actor pointers, the FSM can efficiently manage state transitions and actions for multiple entities across different FSMs.
-
-## Usage
-
-### Defining States, Transitions and Actors
-
-Use the provided macros to define states and transitions:
+### 1. Define States, Transitions, and Actors
 
 ```c
-//State table
+#include "fsm.h"
+
+enum {
+    ST_ROOT = FSM_ST_FIRST,
+    ST_OFF,
+    ST_ON,
+};
+
+enum {
+    EV_ON = FSM_EV_FIRST,
+    EV_OFF,
+    EV_LAST,
+};
+
+// State table (const / Flash-resident)
 FSM_STATES_INIT(my_fsm)
-FSM_CREATE_STATE(my_fsm, STATE1, ROOT_ST, FSM_ST_NONE, enter_state1, run_state1, exit_state1)
-FSM_CREATE_STATE(my_fsm, STATE2, ROOT_ST, FSM_ST_NONE, enter_state2, run_state2, exit_state2)
+FSM_CREATE_STATE(my_fsm, ST_ROOT, FSM_ST_NONE, ST_OFF,      NULL,      NULL,   NULL)
+FSM_CREATE_STATE(my_fsm, ST_OFF,  ST_ROOT,     FSM_ST_NONE, enter_off, NULL,   exit_off)
+FSM_CREATE_STATE(my_fsm, ST_ON,   ST_ROOT,     FSM_ST_NONE, enter_on,  run_on, exit_on)
 FSM_STATES_END()
-// Transition table
+
+// Transition table (const / Flash-resident)
 FSM_TRANSITIONS_INIT(my_fsm)
-FSM_TRANSITION_CREATE(my_fsm, STATE1, EVENT1, STATE2)
-FSM_TRANSITION_CREATE(my_fsm, STATE2, EVENT2, STATE1)
+FSM_TRANSITION_CREATE(my_fsm, ST_OFF, EV_ON,  ST_ON)
+FSM_TRANSITION_WORK_CREATE(my_fsm, ST_ON, EV_OFF, ST_OFF, on_power_off)
+// Optional guarded transition:
+// FSM_TRANSITION_GUARD_CREATE(my_fsm, ST_OFF, EV_ON, ST_ON, can_turn_on, on_turn_on)
 FSM_TRANSITIONS_END()
 
-// Actor 1
+// Optional Actor table (const / Flash-resident)
 FSM_ACTOR_INIT(my_actor)
-FSM_ACTOR_CREATE(my_fsm, STATE1, enter_state1_act1, run_state1_act1, NULL)
-FSM_ACTOR_CREATE(my_fsm, STATE2, enter_state2_act1, run_state2_act1, NULL)
-FSM_ACTOR_END()
-// Actor 2
-FSM_ACTOR_INIT(my_other_actor)
-FSM_ACTOR_CREATE(STATE1, enter_state1_act2, run_state1_act2, NULL)
-FSM_ACTOR_CREATE(STATE2, enter_state2_act2, run_state2_act2, NULL)
+FSM_ACTOR_CREATE(ST_OFF, actor_enter_off, NULL, NULL)
+FSM_ACTOR_CREATE(ST_ON,  actor_enter_on,  actor_run_on, actor_exit_on)
 FSM_ACTOR_END()
 ```
 
-### Initializing the FSM
+### 2. Initialize, Link Actors, Configure Timers, and Run
 
 ```c
-fsm_t my_fsm;
-fsm_init(&my_fsm, my_fsm_transitions, FSM_TRANSITIONS_SIZE(my_fsm), num_events, &FSM_STATE_GET(my_fsm, INIT_ST), initial_data);
+fsm_t my_fsm = {0};
+my_ctx_t ctx = {0};
+
+fsm_init(&my_fsm,
+         FSM_TRANSITIONS_GET(my_fsm),
+         FSM_TRANSITIONS_SIZE(my_fsm),
+         EV_LAST,
+         1,                                // ticks per ms (or FSM_NO_TICKS)
+         &FSM_STATE_GET(my_fsm, ST_ROOT),
+         &ctx);
+
+fsm_actor_link(&my_fsm, FSM_ACTOR_GET(my_actor), FSM_ACTOR_SIZE(my_actor));
+
+// Optional per-instance state timeout (can be set before or after entering the state)
+fsm_timed_event_set(&my_fsm, &FSM_STATE_GET(my_fsm, ST_ON), FSM_MS_2_TICKS(&my_fsm, 500));
+
+// Dispatch events (safe to call with optional per-event payload)
+fsm_dispatch(&my_fsm, EV_ON, NULL);
+
+// Process pending events and execute current state's run_action once
+int rc = fsm_run(&my_fsm);
+
+// Cleanup when finished
+fsm_deinit(&my_fsm);
 ```
-### Linking actor
 
-```c
-ret = fsm_actor_link(&my_fsm, FSM_ACTOR_GET(my_actor), FSM_ACTOR_SIZE(my_actor));
-```
+### 3. Accessing Instance Context vs. Event Payload
 
-### Running the FSM
+- State `run_action` and `FSM_TIMEOUT_EV` callbacks receive `fsm->current_data` (`initial_data`).
+- Entry, exit, guard, and transition work callbacks receive the `data` pointer passed to `fsm_dispatch()`.
+- Any callback can always read or update the instance context via `fsm_data_get(self)` / `fsm_data_set(self, data)`.
 
-```c
-while (!terminated) {
-    fsm_run(&my_fsm);
-}
-```
+## API Reference
 
-### Dispatching Events
+| Function | Purpose |
+| :--- | :--- |
+| `fsm_init(fsm, transitions, num_transitions, num_events, ticks_per_ms, initial_state, initial_data)` | Initialize an FSM instance and enter `initial_state` (including default substates) |
+| `fsm_deinit(fsm)` | Flush/delete queue and reset the FSM instance |
+| `fsm_dispatch(fsm, event, data)` | Enqueue an event to be processed on the next `fsm_run()` |
+| `fsm_run(fsm)` | Process all queued events and run the active state + actors once; returns `0` or `terminate_val` |
+| `fsm_state_get(fsm)` | Return the active leaf state ID (or `FSM_ST_NONE`) |
+| `fsm_actor_link(fsm, actor, size)` | Attach a `const` actor table to an FSM instance |
+| `fsm_timed_event_set(fsm, state, ticks)` | Set per-instance timeout ticks for `state` (`0` disables); immediately arms if active |
+| `fsm_ticks_hook(fsm)` | Decrement active timer by 1 tick and enqueue priority `FSM_TIMEOUT_EV` on expiry |
+| `fsm_data_get(fsm)` / `fsm_data_set(fsm, data)` | Get or update the FSM instance's context pointer |
+| `fsm_has_pending_events(fsm)` | Return `1` if events are queued, `0` if empty, `-1` on error |
+| `fsm_flush_events(fsm)` | Discard all queued events (do not call from ISR in FreeRTOS mode) |
+| `fsm_terminate(fsm, val)` | Stop execution immediately and return `val` from `fsm_run()` |
 
-```c
-fsm_dispatch(&my_fsm, EVENT1, event_data);
-```
+### Composite End States (`FSM_ST_END` / `FSM_END_EV`)
+
+A substate can transition to `FSM_ST_END` to signal completion of its enclosing composite state. The FSM searches upward for the closest ancestor with an `FSM_END_EV` transition (supporting chained `FSM_ST_END` completions). If no ancestor handles `FSM_END_EV`, the FSM terminates with `FSM_END_EV`.
 
 ## Configuration
 
-- `FSM_MAX_EVENTS`: Maximum number of events in the queue (default: 64)
-- `MAX_HIERARCHY_DEPTH`: Maximum depth of state hierarchy (default: 8)
-- `FSM_MAX_TRANSITIONS`: Maximum number of transitions that an event can trigger (default: 8)
+All options can be set via `idf.py menuconfig` (`FSM Configuration`) or compile-time `-D` defines:
 
-## Best Practices
+| Macro | Kconfig | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `CONFIG_FSM_USE_FREERTOS_API` | `FSM_USE_FREERTOS_API` | `n` | Use a statically allocated FreeRTOS queue instead of `ring_buff` |
+| `CONFIG_RUN_ON_TIMER_HOOK` | `FSM_RUN_ON_TIMER_HOOK` | `0` (`n`) | Call `fsm_run()` inside `fsm_ticks_hook()` (enable **only** if strictly serialized with `fsm_run()`) |
+| `FSM_MAX_EVENTS` | `FSM_MAX_EVENTS` | `64` | Event queue slots (bare-metal capacity is `FSM_MAX_EVENTS - 1`) |
+| `MAX_HIERARCHY_DEPTH` | `FSM_MAX_HIERARCHY_DEPTH` | `8` | Maximum state nesting depth |
+| `FSM_MAX_ACTORS` | `FSM_MAX_ACTORS` | `10` | Maximum linked actors per FSM instance |
+| `FSM_MAX_TIMED_STATES` | `FSM_MAX_TIMED_STATES` | `8` | Maximum distinct timed states per FSM instance |
 
-1. Keep state functions (entry, exit, run) small and focused.
-2. Use hierarchical states to group related states and reduce code duplication.
-3. Consider using an enum for state IDs and events for better code readability.
-4. Regularly check for pending events and run the FSM to ensure responsive behavior.
+> **Concurrency Note:** In bare-metal mode, `ring_buff` does not disable interrupts internally. If `fsm_dispatch()` or `fsm_ticks_hook()` is called from an ISR while `fsm_run()` runs in the main loop, either enable `CONFIG_FSM_USE_FREERTOS_API` or wrap queue calls in your platform's critical section.
 
-## Example: Music Player State Machine
+## Generating Mermaid Diagrams
 
-To illustrate the use of this FSM library, in the example folder theres a music player application implemented.
-This state machine demonstrates several key features of the FSM library:
+Generate nested `stateDiagram-v2` diagrams directly from your C source files:
 
-1. **Hierarchical States**: The `STATE_ROOT` contains `STATE_OFF`, `STATE_ON`, and `STATE_LOW_BATTERY`. `STATE_ON` further contains `STATE_PAUSED`, `STATE_PLAYING`, and `STATE_MENU`.
-
-2. **Default Substates**: When entering `STATE_ON`, it automatically enters `STATE_PAUSED`. Similarly, `STATE_PLAYING` defaults to `STATE_NORMAL`.
-
-3. **Multiple Transitions**: States like `STATE_MENU_HOME` have multiple possible transitions based on different events.
-
-4. **Global Transitions**: The `EVENT_LOW_BATTERY` can trigger a transition to `STATE_LOW_BATTERY` from multiple states.
-
-Refer to fsm_music.c to see the implementation.
-
-## Using Mermaid for FSM Diagrams
-
-We recommend using Mermaid for creating clear and visually appealing FSM diagrams. Mermaid is a markdown-based diagramming tool that can be easily integrated into documentation.
-
-### Benefits of Using Mermaid
-
-1. **Easy to Learn**: Mermaid uses a simple, text-based syntax.
-2. **Version Control Friendly**: Diagrams are stored as text, making them easy to version control.
-3. **Widely Supported**: Many platforms, including GitHub, support Mermaid diagrams.
-4. **Interactive**: Mermaid diagrams can be made interactive, allowing users to explore complex state machines.
-
-### Basic Mermaid Syntax for State Diagrams
-
-```
-stateDiagram-v2
-    [*] --> StateA
-    StateA --> StateB : SomeEvent
-    StateB --> StateC : AnotherEvent
-    StateC --> [*]
+```bash
+python3 tools/fsm_2_mermaid.py example/others/fsm_music.c -o docs/
+# Or print directly to stdout:
+python3 tools/fsm_2_mermaid.py example/2_led_blinky/fsm_led.c --stdout
 ```
 
-This creates a simple state diagram with three states and transitions between them.
+## Running Unit Tests
 
-### Tips for FSM Diagrams in Mermaid
+Build and run the full host verification suite (bare-metal & FreeRTOS-mocked C unit tests with AddressSanitizer/UndefinedBehaviorSanitizer, all 7 examples compiled & executed as integration tests, and Mermaid generator tests):
 
-1. Use meaningful state and event names for clarity.
-2. Group related states using Mermaid's composite state feature.
-3. Use comments to explain complex transitions or states.
-4. Consider using different colors or styles for different types of states or transitions.
-
-By using Mermaid to diagram your FSMs, you can easily keep your documentation in sync with your code, making it easier for developers to understand and maintain your state machines.
-
-### Using script for building mermaid diagram
-To make it easier to build your state machine diagrams, under fsm/tools there's a python script that you can use to facilitate this. 
-
-This script takes a .c file that implemets a finite state machine using the FSM library macros:
-
-- FSM_STATES_INIT()
-- FSM_CREATE_STATE()
-- FSM_TRANSITIONS_INIT()
-- FSM_TRANSITION_CREATE()
-    
-Usage: Call script from command line 
+```bash
+make -C tests run
 ```
-    - python fsm/tools/fsm_2_mermaid file_name
-```   
-Where file_name is the .c file that implements the fsm (has to have FSM_CREATE_STATE and FSM_TRANSITION_CREATE somewhere)
 
-### Using Claude AI for Assistance
-To provide additional support for users of this FSM library, we recommend leveraging the capabilities of Claude AI, an advanced language model developed by Anthropic.
-Claude was used to help in the library development and documentation creation process, demonstrating its capability to assist throughout the project lifecycle. 
+Individual targets are also available: `run-unit`, `run-freertos`, `run-examples`, and `run-mermaid`.
 
-Claude is particularly adept at creating Mermaid diagrams for Finite State Machines. You can provide Claude with your states and transition tables, and it will generate a well-structured Mermaid diagram representing your FSM. This feature can significantly streamline the process of visualizing and documenting your state machines.
+## Project Evolution & AI-Assisted Development
 
-## Limitations
+This repository is also a snapshot of how AI-assisted embedded engineering has evolved over a couple of years:
 
-- The library assumes that the transition table and state definitions are correctly defined by the user.
-- The maximum number of events and hierarchy depth are fixed at compile-time.
-
-## Contributing
-
-Contributions to improve the library are welcome. Please submit pull requests or open issues on the project repository.
+- **v1.0 (2024–2025) — Conversational AI Assistance (Claude):** When this library was first built, Claude was used as an interactive design and coding partner — helping reason through tricky logic like the two-pointer Lowest Common Ancestor (`find_lca`) algorithm, double-checking hierarchical state machine architecture decisions, drafting docs, and generating Mermaid diagrams from state tables. The original README from that era is preserved in [README_LEGACY.md](README_LEGACY.md).
+- **v2.0 (2026) — Agentic Engineering (Antigravity):** Returning to this repo with a new generation of agentic AI fundamentally changed the development methodology. Instead of pasting isolated functions into a chat window, the workflow shifted to pointing the agent (Google Antigravity) at the whole codebase to perform a full architectural review, surface memory-safety/HSM/concurrency bugs across C, Kconfig, CMake, examples, and Python tooling, and execute a multi-commit overhaul — shrinking per-instance RAM by >90%, fixing every example, building an ASan/UBSan test suite to validate each change along the way, and handling the git branch, push, and PR workflow end-to-end.
 
 ## License
 
-MIT License
-
-Copyright (c) 2024 Mauro Medina
-
+MIT License — Copyright (c) 2024 Mauro Medina

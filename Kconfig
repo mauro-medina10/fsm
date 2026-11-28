@@ -1,10 +1,46 @@
 menu "FSM Configuration"
 
-    config FREERTOS_API
-        bool "FreeRTOS API"
+    config FSM_USE_FREERTOS_API
+        bool "Use FreeRTOS Queue API"
         default n
         help
-            Select the FreeRTOS API version to use. This will use the freertos queue API to handle 
-            events.
+            Use a statically allocated FreeRTOS queue for the FSM event queue
+            instead of the built-in bare-metal ring buffer.
+
+    config FSM_RUN_ON_TIMER_HOOK
+        bool "Run fsm_run() inside fsm_ticks_hook()"
+        default n
+        help
+            WARNING: Only enable this if fsm_ticks_hook() is called from the
+            same serialized context as fsm_run() (never from an ISR when
+            fsm_run() is also called from a task/main loop).
+
+    config FSM_MAX_EVENTS
+        int "Maximum queued events"
+        default 64
+        range 2 256
+        help
+            Maximum number of events that can be queued in an FSM instance.
+
+    config FSM_MAX_HIERARCHY_DEPTH
+        int "Maximum state hierarchy depth"
+        default 8
+        range 1 32
+        help
+            Maximum nesting depth of hierarchical states.
+
+    config FSM_MAX_ACTORS
+        int "Maximum linked actors per FSM"
+        default 10
+        range 1 64
+        help
+            Maximum number of actors that can be linked to a single FSM instance.
+
+    config FSM_MAX_TIMED_STATES
+        int "Maximum timed states per FSM instance"
+        default 8
+        range 1 64
+        help
+            Maximum number of states with independent timeout periods per FSM instance.
 
 endmenu
