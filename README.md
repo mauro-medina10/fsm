@@ -148,11 +148,13 @@ python3 tools/fsm_2_mermaid.py example/2_led_blinky/fsm_led.c --stdout
 
 ## Running Unit Tests
 
-Build and run the host unit tests (with AddressSanitizer and UndefinedBehaviorSanitizer) and Mermaid generator tests:
+Build and run the full host verification suite (bare-metal & FreeRTOS-mocked C unit tests with AddressSanitizer/UndefinedBehaviorSanitizer, all 5 examples compiled & executed as integration tests, and Mermaid generator tests):
 
 ```bash
 make -C tests run
 ```
+
+Individual targets are also available: `run-unit`, `run-freertos`, `run-examples`, and `run-mermaid`.
 
 ## Project Evolution & AI-Assisted Development
 

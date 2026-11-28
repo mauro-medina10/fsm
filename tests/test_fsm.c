@@ -9,7 +9,11 @@
 #include <string.h>
 
 #include "fsm.h"
+#if !FSM_USE_FREERTOS_API
 #include "ring_buff.h"
+#else
+int mock_freertos_in_isr = 0;
+#endif
 
 /* -------------------------------------------------------------------------- */
 /* Minimal test harness                                                       */
@@ -79,8 +83,9 @@ static void trace_add(const char *entry)
 }
 
 /* -------------------------------------------------------------------------- */
-/* 1. Ring buffer tests                                                       */
+/* 1. Queue backend tests (ring_buff or FreeRTOS mock)                        */
 /* -------------------------------------------------------------------------- */
+#if !FSM_USE_FREERTOS_API
 static void test_ringbuff_basic_and_wraparound(void)
 {
     uint32_t storage[4];
@@ -162,6 +167,7 @@ static void test_ringbuff_put_first_and_full_preservation(void)
     ASSERT_EQ_INT(0, (int)ringbuff_flush(&rb));
     ASSERT_EQ_INT(0, (int)ringbuff_num(&rb));
 }
+#endif /* !FSM_USE_FREERTOS_API */
 
 /* -------------------------------------------------------------------------- */
 /* 2. Hierarchical FSM test fixture                                           */
@@ -768,10 +774,49 @@ static void test_termination_in_every_phase_and_redispatch(void)
     fsm_deinit(&m);
 }
 
+#if FSM_USE_FREERTOS_API
+static void test_freertos_isr_context_and_flush(void)
+{
+    fsm_t m;
+    mock_freertos_in_isr = 0;
+
+    ASSERT_EQ_INT(0, fsm_init(&m, FSM_TRANSITIONS_GET(tmrfsm), FSM_TRANSITIONS_SIZE(tmrfsm), TEV_LAST, 1, &FSM_STATE_GET(tmrfsm, T_ROOT), NULL));
+    ASSERT_EQ_INT(0, fsm_timed_event_set(&m, &FSM_STATE_GET(tmrfsm, T_OFF), 1));
+
+    /* Dispatch normal event from ISR, then trigger priority timeout from ISR */
+    mock_freertos_in_isr = 1;
+    fsm_dispatch(&m, TEV_GROUP, NULL);
+    fsm_ticks_hook(&m); /* sends FSM_TIMEOUT_EV to front from ISR */
+    ASSERT_EQ_INT(1, fsm_has_pending_events(&m));
+
+    /* fsm_flush_events() must be a safe no-op in ISR context */
+    fsm_flush_events(&m);
+    ASSERT_EQ_INT(1, fsm_has_pending_events(&m));
+
+    /* Run from task context: FSM_TIMEOUT_EV fires first (T_OFF -> T_ON), TEV_GROUP ignored in T_ON */
+    mock_freertos_in_isr = 0;
+    ASSERT_EQ_INT(0, fsm_run(&m));
+    ASSERT_EQ_INT(T_ON, fsm_state_get(&m));
+
+    /* Flush works in task context */
+    fsm_dispatch(&m, TEV_GROUP, NULL);
+    ASSERT_EQ_INT(1, fsm_has_pending_events(&m));
+    fsm_flush_events(&m);
+    ASSERT_EQ_INT(0, fsm_has_pending_events(&m));
+
+    fsm_deinit(&m);
+    ASSERT_TRUE(m.event_queue == NULL);
+}
+#endif
+
 int main(void)
 {
+#if !FSM_USE_FREERTOS_API
     RUN_TEST(test_ringbuff_basic_and_wraparound);
     RUN_TEST(test_ringbuff_put_first_and_full_preservation);
+#else
+    RUN_TEST(test_freertos_isr_context_and_flush);
+#endif
     RUN_TEST(test_fsm_init_guards_and_footprint);
     RUN_TEST(test_initial_composite_entry_and_hsm_transitions);
     RUN_TEST(test_self_transitions_symmetric);
